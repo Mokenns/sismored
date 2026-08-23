@@ -157,12 +157,19 @@ class SeismicEngine {
             const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${cha}&starttime=${startStr}&endtime=${endStr}&output=ascii1`;
             
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 4500);
+            const timeoutId = setTimeout(() => controller.abort(), 12000);
             
             const res = await fetch(url, { signal: controller.signal });
             clearTimeout(timeoutId);
             
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) {
+                if (res.status === 404 || res.status === 400) {
+                    state.hasFailed = true;
+                    if (card) card.style.display = 'none';
+                }
+                throw new Error(`HTTP ${res.status}`);
+            }
+            
             const text = await res.text();
             const lines = text.trim().split('\n');
             
@@ -188,8 +195,7 @@ class SeismicEngine {
                 throw new Error('No data');
             }
         } catch (e) {
-            state.hasFailed = true;
-            if (card) card.style.display = 'none';
+            console.warn(`[FDSN] ${station.code}:`, e.message);
         } finally {
             state.isFetching = false;
             if (regSection) {
@@ -205,7 +211,11 @@ class SeismicEngine {
 
     async pollLiveFDSNForVisible(visibleStationsList) {
         const nowMs = Date.now();
-        await Promise.all(visibleStationsList.map(st => this.fetchStationData(st, nowMs)));
+        const chunkSize = 6;
+        for (let i = 0; i < visibleStationsList.length; i += chunkSize) {
+            const chunk = visibleStationsList.slice(i, i + chunkSize);
+            await Promise.all(chunk.map(st => this.fetchStationData(st, nowMs)));
+        }
     }
 
     renderWebicorder(canvas, station, buffer, maxAbs, effectiveScale, lines) {

@@ -6,7 +6,7 @@
 function getStationFrequencyRange(st, tf) {
     if (tf === '24h' || tf === '3h') {
         return {
-            text: "0.001 - 0.50 Hz (LHZ, 1 sps)",
+            text: "0.001 - 0.50 Hz (LHZ 1 sps)",
             hpDefault: 0.001,
             hpMin: 0.001,
             hpMax: 0.45,
@@ -18,9 +18,25 @@ function getStationFrequencyRange(st, tf) {
         };
     }
     
+    // GSN Stations (Very Broadband 360s)
+    if (st.network === 'IU' || st.network === 'II') {
+        return {
+            text: "0.0028 - 50.0 Hz (GSN 360s)",
+            hpDefault: 0.01,
+            hpMin: 0.01,
+            hpMax: 10.0,
+            hpStep: 0.05,
+            lpDefault: 50.0,
+            lpMin: 1.0,
+            lpMax: 50.0,
+            lpStep: 0.5
+        };
+    }
+
+    // Strong Motion Accelerometers
     if (st.sensorClass === 'accelerometer' || (st.code && st.code.startsWith('GO'))) {
         return {
-            text: "0.10 - 50.0 Hz (HNZ, 100 sps)",
+            text: "0.10 - 50.0 Hz (Acelerógrafo)",
             hpDefault: 0.1,
             hpMin: 0.05,
             hpMax: 10.0,
@@ -32,9 +48,10 @@ function getStationFrequencyRange(st, tf) {
         };
     }
     
+    // Short Period
     if (st.sensorClass === 'short_period') {
         return {
-            text: "1.0 - 50.0 Hz (EHZ, 100 sps)",
+            text: "1.0 - 50.0 Hz (Corto Periodo)",
             hpDefault: 1.0,
             hpMin: 0.1,
             hpMax: 15.0,
@@ -46,9 +63,9 @@ function getStationFrequencyRange(st, tf) {
         };
     }
     
-    // Standard Broadband
+    // Standard CSN Broadband (Trillium 120s / STS-2)
     return {
-        text: "0.01 - 50.0 Hz (HHZ, 100 sps)",
+        text: "0.0083 - 50.0 Hz (Banda Ancha 120s)",
         hpDefault: 0.01,
         hpMin: 0.01,
         hpMax: 10.0,
