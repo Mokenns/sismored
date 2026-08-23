@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SismoRed Chile | Telemetría FDSN en Tiempo Real</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Compact clean overrides */
+        .top-nav-bar { background: #090e18; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding: 0.75rem 1.5rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; justify-content: space-between;}
+        .filter-group { display: flex; align-items: center; gap: 0.5rem; }
+        .filter-label { font-size: 0.72rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; }
+        .clean-input { background: #111b30; color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 0.35rem 0.6rem; border-radius: 4px; font-size: 0.8rem; outline: none; }
+        .clean-input:focus { border-color: #00d2ff; }
+        #transect-view-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(580px, 1fr)); gap: 1.25rem; align-items: start; padding: 1.5rem; max-width: 1800px; margin: 0 auto; }
+        .region-section { background: rgba(17, 27, 48, 0.45); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+        .stations-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
+        .region-header { margin-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.5rem; }
+        .region-name { font-size: 1.1rem; color: #f8fafc; font-weight: 700;}
+        .dsp-controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.4rem; background: #060a12; padding: 0.4rem 0.5rem; border-radius: 4px; margin-bottom: 0.5rem; border: 1px solid rgba(255,255,255,0.05); }
+          .dsp-col { display: flex; flex-direction: column; min-width: 0; }
+          .dsp-label { font-size: 0.62rem; color: #94a3b8; font-family: 'JetBrains Mono', monospace; margin-bottom: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .btn-timeframe.active { background: rgba(0, 210, 255, 0.2); border-color: var(--color-csn); color: var(--color-csn); font-weight: 700; }
+        .btn-24h { border-color: #b388ff; color: #b388ff; }
+        .btn-24h.active { background: rgba(179, 136, 255, 0.2); color: #b388ff; }
+    </style>
+</head>
+<body>
+    <header class="header-observatory">
+        <div class="header-container">
+            <div class="brand-section">
+                <div class="brand-icon">📈</div>
+                <div>
+                    <div class="brand-title">SismoRed Chile</div>
+                    <div class="brand-subtitle">Telemetría FDSNWS Cruda en Tiempo Real</div>
+                </div>
+            </div>
+            <div class="header-controls">
+                <div class="pill-status">
+                    <div class="pulse-dot"></div>
+                    <span id="live-time-display">Cargando Reloj...</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="top-nav-bar">
+        <div style="display:flex; gap:1.5rem; align-items:center; flex-wrap:wrap;">
+            <div class="filter-group">
+                <div class="filter-label">Región:</div>
+                <select class="clean-input" id="region-selector">
+                    <!-- JS fills this -->
+                </select>
+            </div>
+            
+            
+
+            <div class="filter-group">
+                <input type="text" id="search-stations" class="clean-input" placeholder="🔍 Buscar estación..." style="width: 200px;">
+            </div>
+        </div>
+
+        <div style="display:flex; gap:1.5rem; align-items:center; flex-wrap:wrap;">
+            <div class="timeframe-group">
+                <span class="filter-label" style="margin-right:0.2rem;">Tiempo:</span>
+                <button class="btn-timeframe" data-timeframe="10s">10s</button>
+                <button class="btn-timeframe active" data-timeframe="1m">1m</button>
+                <button class="btn-timeframe" data-timeframe="10m">10m</button>
+                <button class="btn-timeframe" data-timeframe="1h">1h</button>
+                <button class="btn-timeframe" data-timeframe="3h">3h</button>
+                <button class="btn-timeframe btn-24h" data-timeframe="24h">24h (Webicorder)</button>
+            </div>
+            
+            <div class="scale-group">
+                <button class="btn-autoscale active" id="btn-autoscale-toggle" style="margin-right: 0.5rem;">✨ Auto-Escala: ON</button>
+                <div class="scale-slider-container">
+                    <input type="range" class="scale-slider" id="scale-gain-slider" min="0.1" max="25" step="0.1" value="3.0">
+                    <span id="scale-slider-val">3.0x</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main View without Sidebar -->
+    <main class="main-layout" style="height: calc(100vh - 125px); overflow-y: auto; background: #0c1322;">
+        <div id="transect-view-container" style="padding: 1.5rem; max-width: 1800px; margin: 0 auto;">
+            <!-- JS will populate stations here -->
+        </div>
+    </main>
+
+    <script src="stations-data.js"></script>
+    <script src="seismic-engine.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

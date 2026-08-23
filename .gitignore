@@ -1,0 +1,8 @@
+# Logs & Temp files
+*.log
+*.tmp
+*.bak
+*.png
+.DS_Store
+Thumbs.db
+node_modules/
