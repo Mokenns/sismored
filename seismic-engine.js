@@ -198,14 +198,6 @@ class SeismicEngine {
             console.warn(`[FDSN] ${station.code}:`, e.message);
         } finally {
             state.isFetching = false;
-            if (regSection) {
-                const visibleCards = regSection.querySelectorAll('.station-card:not([style*="display: none"])');
-                if (visibleCards.length === 0) {
-                    regSection.style.display = 'none';
-                } else {
-                    regSection.style.display = '';
-                }
-            }
         }
     }
 
