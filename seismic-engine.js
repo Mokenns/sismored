@@ -97,7 +97,7 @@ class SeismicEngine {
         let lpVal = hpVal;
         
         for (let i = 0; i < rawData.length; i++) {
-            const minHpThreshold = sampleRate < 5 ? 0.0005 : 0.02;
+            const minHpThreshold = sampleRate < 2 ? 0.0005 : 0.01;
             if (hpFreq > minHpThreshold) {
                 hpVal = alphaHP * (hpVal + rawData[i] - (i > 0 ? rawData[i-1] : rawData[0]));
             } else {
@@ -142,10 +142,22 @@ class SeismicEngine {
             if (net === 'C') net = 'C1';
             let loc = (net === 'IU' || net === 'II') ? '00' : '--';
             let cha = station.channels[0] || 'HHZ';
+            let isWebicorder = false;
             
             if (this.timeframe === '24h' || this.timeframe === '3h') {
-                cha = 'LHZ';
-                latencyMs = 15 * 60 * 1000; 
+                // Professional webicorder: prefer BHZ (broadband), fall back to HHZ, then LHZ
+                const channels = station.channels || [];
+                if (channels.includes('BHZ')) {
+                    cha = 'BHZ';
+                } else if (channels.includes('HHZ')) {
+                    cha = 'HHZ';
+                } else if (channels.includes('LHZ')) {
+                    cha = 'LHZ';
+                } else {
+                    cha = 'BHZ'; // Default attempt
+                }
+                latencyMs = 15 * 60 * 1000;
+                isWebicorder = true;
             }
             
             const endDt = new Date(nowMs - latencyMs);
@@ -154,10 +166,19 @@ class SeismicEngine {
             const startStr = startDt.toISOString().split('.')[0];
             const endStr = endDt.toISOString().split('.')[0];
             
-            const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${cha}&starttime=${startStr}&endtime=${endStr}&output=ascii1`;
+            // For webicorder modes: server-side demean + anti-aliased decimation
+            let processing = '';
+            if (isWebicorder) {
+                if (cha === 'LHZ') {
+                    processing = '&demean=true'; // LHZ is already 1 sps, no decimation needed
+                } else {
+                    processing = '&demean=true&decimate=4'; // BHZ(40)/HHZ(100) → 4 sps
+                }
+            }
+            const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${cha}&starttime=${startStr}&endtime=${endStr}${processing}&output=ascii1`;
             
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 12000);
+            const timeoutId = setTimeout(() => controller.abort(), isWebicorder ? 30000 : 12000);
             
             const res = await fetch(url, { signal: controller.signal });
             clearTimeout(timeoutId);
@@ -184,6 +205,7 @@ class SeismicEngine {
                 state.rawFdsnBuffer = rawSamples; 
                 state.bufferZ = this.applyLocalFilter(rawSamples, state.sampleRate, state.hpFilter, state.lpFilter);
                 state.lastFetchTime = endDt.getTime();
+                state.dataStartTime = startDt.getTime();
                 state.hasFailed = false;
                 if (card && card.style.display === 'none') card.style.display = 'flex';
                 
@@ -213,11 +235,16 @@ class SeismicEngine {
     renderWebicorder(canvas, station, buffer, maxAbs, effectiveScale, lines) {
         const ctx = canvas.getContext('2d');
         const width = canvas.width;
+        const state = this.getOrCreateStationState(station.code, station);
         
-        if (this.timeframe === '24h') lines = 12;
-        if (this.timeframe === '3h') lines = 3;
+        // Professional standard: 24 rows (1h each) for 24h, 9 rows (20min each) for 3h
+        if (this.timeframe === '24h') {
+            lines = 24;
+        } else if (this.timeframe === '3h') {
+            lines = 9;
+        }
         
-        const requiredHeight = lines === 12 ? 800 : 250; 
+        const requiredHeight = (this.timeframe === '24h') ? 960 : 320;
         
         if (canvas.height !== requiredHeight) {
             canvas.height = requiredHeight;
@@ -232,85 +259,162 @@ class SeismicEngine {
         ctx.fillStyle = '#060a12'; 
         ctx.fillRect(0, 0, width, height);
 
-        const padLeft = 45;
+        const padLeft = 50;
         const padBottom = 16;
         const plotWidth = width - padLeft;
         const plotHeight = height - padBottom;
         
         const rowHeight = plotHeight / lines;
-        const lineColors = ['#0ea5e9', '#ef4444', '#10b981', '#f59e0b', '#d946ef', '#8b5cf6'];
+        
+        // Professional helicorder color cycle (4 colors like IRIS: black/blue/red/green on dark bg)
+        const lineColors = ['#e0e0e0', '#4da6ff', '#ff6b6b', '#4ade80'];
 
-        ctx.lineWidth = 0.8;
+        ctx.lineWidth = 0.7;
         ctx.lineJoin = 'round';
         
-        // Draw grid lines
-        ctx.strokeStyle = '#1e293b';
+        // Draw horizontal grid lines between rows
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.beginPath();
         for (let l = 1; l < lines; l++) {
             ctx.moveTo(padLeft, l * rowHeight);
             ctx.lineTo(width, l * rowHeight);
         }
-        for (let i = 0; i <= 6; i++) {
-            const x = padLeft + (i / 6) * plotWidth;
+        ctx.stroke();
+        
+        // Draw vertical grid lines (minute ticks)
+        const minutesPerRow = (this.timeframe === '24h') ? 60 : 20;
+        const majorTickMinutes = (this.timeframe === '24h') ? 10 : 5;
+        const numMajorTicks = minutesPerRow / majorTickMinutes;
+        
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+        ctx.beginPath();
+        for (let i = 1; i < numMajorTicks; i++) {
+            const x = padLeft + (i / numMajorTicks) * plotWidth;
             ctx.moveTo(x, 0);
             ctx.lineTo(x, plotHeight);
         }
         ctx.stroke();
 
-        let mean = 0;
-        if (buffer.length > 0) mean = buffer.reduce((a, b) => a + b, 0) / buffer.length;
-        
         const ptsPerLine = Math.ceil(buffer.length / lines);
-        const state = this.getOrCreateStationState(station.code, station);
         const customGain = state.customGain || 1.0;
+        
+        // Compute global maxAbs across all per-row detrended data for consistent scaling
+        let globalMaxAbs = 0.0001;
+        for (let l = 0; l < lines; l++) {
+            const startIdx = l * ptsPerLine;
+            const endIdx = Math.min((l + 1) * ptsPerLine, buffer.length);
+            if (endIdx <= startIdx) continue;
+            
+            // Per-row mean for detrending
+            let rowSum = 0;
+            for (let i = startIdx; i < endIdx; i++) rowSum += buffer[i];
+            const rowMean = rowSum / (endIdx - startIdx);
+            
+            for (let i = startIdx; i < endIdx; i++) {
+                const a = Math.abs(buffer[i] - rowMean);
+                if (a > globalMaxAbs) globalMaxAbs = a;
+            }
+        }
         
         let webiScale;
         if (this.autoScale) {
             const gainFactor = (this.globalGain / 3.0) * customGain;
-            webiScale = (rowHeight / (maxAbs || 1)) * 0.42 * gainFactor;
+            webiScale = (rowHeight / (globalMaxAbs || 1)) * 0.40 * gainFactor;
         } else {
             const baseAmp = 1000.0;
-            webiScale = (rowHeight * 0.42 / baseAmp) * (this.globalGain / 3.0) * customGain;
+            webiScale = (rowHeight * 0.40 / baseAmp) * (this.globalGain / 3.0) * customGain;
         }
         
+        // Determine UTC start time for labels
+        const dataStartMs = state.dataStartTime || (Date.now() - this.getTimeWindowSeconds() * 1000);
+        const rowDurationMs = (minutesPerRow * 60) * 1000;
+        
+        // Render each row with per-row detrending (professional standard)
         for (let l = 0; l < lines; l++) {
-            ctx.strokeStyle = lineColors[l % lineColors.length];
-            ctx.beginPath();
-            const rowCenterY = (l * rowHeight) + (rowHeight / 2);
-            
             const startIdx = l * ptsPerLine;
             const endIdx = Math.min((l + 1) * ptsPerLine, buffer.length);
+            if (endIdx <= startIdx) continue;
             
-            for (let i = startIdx; i < endIdx; i++) {
-                const px = padLeft + ((i - startIdx) / ptsPerLine) * plotWidth;
-                const valCentered = buffer[i] - mean;
-                const py = rowCenterY - (valCentered * webiScale);
-                
-                if (i === startIdx) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
+            // Per-row detrending: remove mean from this row segment
+            let rowSum = 0;
+            for (let i = startIdx; i < endIdx; i++) rowSum += buffer[i];
+            const rowMean = rowSum / (endIdx - startIdx);
+            
+            const rowCenterY = (l * rowHeight) + (rowHeight / 2);
+            const rowPts = endIdx - startIdx;
+            
+            ctx.strokeStyle = lineColors[l % lineColors.length];
+            ctx.beginPath();
+            
+            // Min-Max envelope decimation for performance
+            const ptsPerPixel = rowPts / plotWidth;
+            
+            if (ptsPerPixel <= 1.5) {
+                // Direct draw — few enough points
+                for (let i = startIdx; i < endIdx; i++) {
+                    const px = padLeft + ((i - startIdx) / rowPts) * plotWidth;
+                    const val = buffer[i] - rowMean;
+                    const py = Math.max(l * rowHeight + 1, Math.min((l + 1) * rowHeight - 1,
+                        rowCenterY - (val * webiScale)));
+                    if (i === startIdx) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+            } else {
+                // Min-Max envelope: 1 min/max pair per pixel column
+                for (let px = 0; px < plotWidth; px++) {
+                    const si = startIdx + Math.floor((px / plotWidth) * rowPts);
+                    let ei = startIdx + Math.floor(((px + 1) / plotWidth) * rowPts);
+                    if (ei > endIdx) ei = endIdx;
+                    
+                    let minVal = Infinity, maxVal = -Infinity;
+                    for (let i = si; i < ei; i++) {
+                        const val = buffer[i] - rowMean;
+                        if (val < minVal) minVal = val;
+                        if (val > maxVal) maxVal = val;
+                    }
+                    
+                    const x = padLeft + px;
+                    let yMin = Math.max(l * rowHeight + 1, Math.min((l + 1) * rowHeight - 1,
+                        rowCenterY - (minVal * webiScale)));
+                    let yMax = Math.max(l * rowHeight + 1, Math.min((l + 1) * rowHeight - 1,
+                        rowCenterY - (maxVal * webiScale)));
+                    
+                    if (px === 0) ctx.moveTo(x, yMin);
+                    else ctx.lineTo(x, yMin);
+                    ctx.lineTo(x, yMax);
+                }
             }
             ctx.stroke();
+            
+            // UTC clock time label (top → bottom, like professional helicorder)
+            const rowStartMs = dataStartMs + (l * rowDurationMs);
+            const rowDate = new Date(rowStartMs);
+            const hh = String(rowDate.getUTCHours()).padStart(2, '0');
+            const mm = String(rowDate.getUTCMinutes()).padStart(2, '0');
+            const timeStr = `${hh}:${mm}`;
             
             ctx.fillStyle = '#94a3b8';
             ctx.font = 'bold 9px monospace';
             ctx.textAlign = 'right';
-            
-            let timeStr = (this.timeframe === '24h') ? `-${(lines - l) * 2}h` : `-${lines - l}h`;
             ctx.fillText(timeStr, padLeft - 4, rowCenterY + 3);
         }
 
+        // X-axis labels (minutes within each row)
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '8px monospace';
         ctx.textAlign = 'center';
-        for (let i = 0; i <= 6; i++) {
-            const x = padLeft + (i / 6) * plotWidth;
-            let minStr = (this.timeframe === '24h') ? (i * 20) + "m" : (i * 10) + "m";
-            ctx.fillText(minStr, x, height - 2);
+        for (let i = 0; i <= numMajorTicks; i++) {
+            const x = padLeft + (i / numMajorTicks) * plotWidth;
+            const minLabel = i * majorTickMinutes;
+            ctx.fillText(`${minLabel}`, x, height - 2);
         }
 
+        // Max amplitude tag
         const tag = document.getElementById(`pgv-tag-${station.code}`);
         if (tag) {
-            let formattedMax = maxAbs.toFixed(0);
+            let formattedMax = globalMaxAbs.toFixed(0);
             if (!this.autoScale) {
-                formattedMax = ((rowHeight * 0.42) / (webiScale || 1)).toFixed(0);
+                formattedMax = ((rowHeight * 0.40) / (webiScale || 1)).toFixed(0);
             }
             tag.textContent = `Max: ±${formattedMax} cnt`;
         }

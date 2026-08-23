@@ -6,14 +6,14 @@
 function getStationFrequencyRange(st, tf) {
     if (tf === '24h' || tf === '3h') {
         return {
-            text: "0.001 - 0.50 Hz (LHZ 1 sps)",
-            hpDefault: 0.001,
-            hpMin: 0.001,
-            hpMax: 0.45,
+            text: "0.01 - 2.0 Hz (BHZ→4 sps)",
+            hpDefault: 0.01,
+            hpMin: 0.005,
+            hpMax: 1.5,
             hpStep: 0.005,
-            lpDefault: 0.5,
-            lpMin: 0.01,
-            lpMax: 0.5,
+            lpDefault: 2.0,
+            lpMin: 0.05,
+            lpMax: 2.0,
             lpStep: 0.01
         };
     }
