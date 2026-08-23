@@ -135,27 +135,36 @@ class SeismicEngine {
         const regSection = card ? card.closest('.region-section') : null;
         
         try {
-            let latencyMs = 2 * 60 * 1000; 
+            let latencyMs = 5 * 60 * 1000; 
             let windowSec = this.getTimeWindowSeconds();
             
             let net = station.network;
             if (net === 'C') net = 'C1';
             let loc = (net === 'IU' || net === 'II') ? '00' : '--';
-            let cha = station.channels[0] || 'HHZ';
+            
+            const channels = station.channels || [];
+            let cha = 'HHZ';
+            
+            if (this.timeframe === '24h' || this.timeframe === '3h') {
+                // Professional webicorder: prefer BHZ (broadband), then HHZ/HNZ
+                if (channels.includes('BHZ')) cha = 'BHZ';
+                else if (channels.includes('HHZ')) cha = 'HHZ';
+                else if (channels.includes('HNZ')) cha = 'HNZ';
+                else if (channels.includes('EHZ')) cha = 'EHZ';
+                else if (channels.includes('LHZ')) cha = 'LHZ';
+                else cha = channels.find(c => c.endsWith('Z')) || 'BHZ';
+            } else {
+                // Live mode: prefer HHZ/HNZ (high rate), then BHZ
+                if (channels.includes('HHZ')) cha = 'HHZ';
+                else if (channels.includes('HNZ')) cha = 'HNZ';
+                else if (channels.includes('BHZ')) cha = 'BHZ';
+                else if (channels.includes('EHZ')) cha = 'EHZ';
+                else cha = channels.find(c => c.endsWith('Z')) || 'HHZ';
+            }
+            
             let isWebicorder = false;
             
             if (this.timeframe === '24h' || this.timeframe === '3h') {
-                // Professional webicorder: prefer BHZ (broadband), fall back to HHZ, then LHZ
-                const channels = station.channels || [];
-                if (channels.includes('BHZ')) {
-                    cha = 'BHZ';
-                } else if (channels.includes('HHZ')) {
-                    cha = 'HHZ';
-                } else if (channels.includes('LHZ')) {
-                    cha = 'LHZ';
-                } else {
-                    cha = 'BHZ'; // Default attempt
-                }
                 latencyMs = 15 * 60 * 1000;
                 isWebicorder = true;
             }
@@ -185,8 +194,14 @@ class SeismicEngine {
             
             if (!res.ok) {
                 if (res.status === 404 || res.status === 400) {
-                    state.hasFailed = true;
-                    if (card) card.style.display = 'none';
+                    if (isWebicorder) {
+                        // No data for the last 24h/3h -> station is truly offline. Remove it.
+                        state.hasFailed = true;
+                        if (card) card.style.display = 'none';
+                    } else {
+                        // Live mode 404 -> telemetry delay. Don't hide the card, 
+                        // just let it wait for data to arrive.
+                    }
                 }
                 throw new Error(`HTTP ${res.status}`);
             }
