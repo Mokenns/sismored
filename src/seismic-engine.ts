@@ -199,7 +199,7 @@ export class SeismicEngine {
                 sampleRate,
                 hpFreq,
                 lpFreq,
-                applyDemean: true
+                applyDemean: false
             });
         });
     }
@@ -394,9 +394,23 @@ export class SeismicEngine {
             const cappedSamples = Math.min(totalSamplesNeeded, maxSamples);
             const timeIndexedBuffer = new Float32Array(cappedSamples); // zeros = gaps
             
-            // Place each record's samples at their correct time position
+            // Calculate global mean of actual data to prevent gaps from becoming massive steps
+            let totalSum = 0;
+            let validSampleCount = 0;
+            const decompressedRecords = [];
+            for (const rec of records) {
+                const decoded = rec.decompress();
+                decompressedRecords.push(decoded);
+                for (let i = 0; i < decoded.length; i++) totalSum += decoded[i];
+                validSampleCount += decoded.length;
+            }
+            const globalMean = validSampleCount > 0 ? (totalSum / validSampleCount) : 0;
+            
+            // Place each record's samples at their correct time position, centered around 0
+            let recIdx = 0;
             for (const rec of records) {
                 const recStartMs = headerTimeMs(rec.header);
+                const decoded = decompressedRecords[recIdx++];
                 if (recStartMs <= 0) continue;
                 
                 const offsetMs = recStartMs - actualStartMs;
@@ -404,10 +418,9 @@ export class SeismicEngine {
                 
                 if (offsetSamples < 0 || offsetSamples >= cappedSamples) continue;
                 
-                const decoded = rec.decompress();
                 const copyLen = Math.min(decoded.length, cappedSamples - offsetSamples);
                 for (let i = 0; i < copyLen; i++) {
-                    timeIndexedBuffer[offsetSamples + i] = decoded[i];
+                    timeIndexedBuffer[offsetSamples + i] = decoded[i] - globalMean;
                 }
             }
             
