@@ -187,8 +187,21 @@ class SismoRedApp {
                 const lpEl = document.querySelector(`.lp-slider[data-code="${code}"]`) as HTMLInputElement;
                 if (!hpEl || !lpEl) return;
                 
-                const hp = parseFloat(hpEl.value);
-                const lp = parseFloat(lpEl.value);
+                let hp = parseFloat(hpEl.value);
+                let lp = parseFloat(lpEl.value);
+                
+                // Keep passband valid: HP must be strictly less than LP
+                if (target.classList.contains('hp-slider')) {
+                    if (hp >= lp) {
+                        lp = Math.min(parseFloat(lpEl.max), hp + parseFloat(hpEl.step || '0.1'));
+                        lpEl.value = lp.toString();
+                    }
+                } else if (target.classList.contains('lp-slider')) {
+                    if (lp <= hp) {
+                        hp = Math.max(parseFloat(hpEl.min), lp - parseFloat(lpEl.step || '0.1'));
+                        hpEl.value = hp.toString();
+                    }
+                }
                 
                 const hpValSpan = document.getElementById(`hp-val-${code}`);
                 const lpValSpan = document.getElementById(`lp-val-${code}`);
@@ -228,7 +241,13 @@ class SismoRedApp {
                 const lpEl = document.querySelector(`.lp-slider[data-code="${code}"]`) as HTMLInputElement;
                 if (hpEl && lpEl) {
                     if (sliderTimers.has(`filter-${code}`)) clearTimeout(sliderTimers.get(`filter-${code}`));
-                    this.engine.setStationFilter(code, parseFloat(hpEl.value), parseFloat(lpEl.value));
+                    let hp = parseFloat(hpEl.value);
+                    let lp = parseFloat(lpEl.value);
+                    if (hp >= lp) {
+                        hp = Math.max(parseFloat(hpEl.min), lp * 0.5);
+                        hpEl.value = hp.toString();
+                    }
+                    this.engine.setStationFilter(code, hp, lp);
                 }
             } else if (target.classList.contains('gain-slider')) {
                 const code = target.getAttribute('data-code')!;

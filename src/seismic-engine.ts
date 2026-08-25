@@ -175,6 +175,14 @@ export class SeismicEngine {
             state.lpFilter = lp;
             if (state.rawFdsnBuffer && state.rawFdsnBuffer.length > 0) {
                 state.bufferZ = await this.applyFilterAsync(state.rawFdsnBuffer, state.sampleRate, hp, lp);
+                
+                let m = 0;
+                for (let i = 0; i < state.bufferZ.length; i++) {
+                    const v = Math.abs(state.bufferZ[i]);
+                    if (v > m) m = v;
+                }
+                state.maxAbs = m;
+                
                 this.renderStationCanvas(stationCode);
             }
         }
