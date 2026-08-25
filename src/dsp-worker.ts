@@ -99,14 +99,18 @@ function filtfilt(x: Float32Array, b0: number, b1: number, b2: number, a1: numbe
     const n = x.length;
     if (n <= 4) return x;
     
+    // Calculate true DC gain to find exact steady-state initial conditions
+    const dcGain = (b0 + b1 + b2) / (1 + a1 + a2);
+    
     // Forward pass
     const yForward = new Float64Array(n);
     let z1 = 0.0, z2 = 0.0;
     
-    // Initialize filter state with steady-state step response
+    // Initialize filter state with exact steady-state for a step input
     const x0 = x[0];
-    z1 = (b1 - a1 * b0) * x0;
-    z2 = (b2 - a2 * b0) * x0;
+    const y0 = x0 * dcGain;
+    z1 = x0 * (b1 + b2) - y0 * (a1 + a2);
+    z2 = x0 * b2 - y0 * a2;
     
     for (let i = 0; i < n; i++) {
         const xi = x[i];
@@ -119,8 +123,9 @@ function filtfilt(x: Float32Array, b0: number, b1: number, b2: number, a1: numbe
     // Backward pass
     const yBackward = new Float64Array(n);
     const lastY = yForward[n - 1];
-    z1 = (b1 - a1 * b0) * lastY;
-    z2 = (b2 - a2 * b0) * lastY;
+    const yLast = lastY * dcGain;
+    z1 = lastY * (b1 + b2) - yLast * (a1 + a2);
+    z2 = lastY * b2 - yLast * a2;
     
     for (let i = n - 1; i >= 0; i--) {
         const xi = yForward[i];
