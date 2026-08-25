@@ -413,7 +413,7 @@ export class SeismicEngine {
             
             if (cappedSamples > 0) {
                 state.sampleRate = firstSampleRate;
-                state.channelCode = records[0].header.channelCode;
+                state.channelCode = records[0].header.chanCode;
                 state.rawFdsnBuffer = timeIndexedBuffer;
                 state.bufferZ = await this.applyFilterAsync(timeIndexedBuffer, firstSampleRate, state.hpFilter, state.lpFilter);
                 state.dataStartTime = actualStartMs;
