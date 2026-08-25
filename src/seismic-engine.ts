@@ -233,7 +233,7 @@ export class SeismicEngine {
         state.isFetching = true;
         
         try {
-            let latencyMs = 5 * 60 * 1000; 
+            let latencyMs = 2 * 60 * 1000; // 2 minutes default latency
             let windowSec = this.getTimeWindowSeconds();
             
             let net = station.network;
@@ -242,7 +242,7 @@ export class SeismicEngine {
             
             let isWebicorder = false;
             if (this.timeframe === '24h' || this.timeframe === '3h') {
-                latencyMs = 15 * 60 * 1000;
+                latencyMs = 3 * 60 * 1000; // 3 minutes for webicorders
                 isWebicorder = true;
             }
             
@@ -365,7 +365,7 @@ export class SeismicEngine {
                 state.rawFdsnBuffer = rawSamples; 
                 state.bufferZ = await this.applyFilterAsync(rawSamples, state.sampleRate, state.hpFilter, state.lpFilter);
                 
-                // Use actual miniseed start time if available to prevent drift
+                // Use actual miniseed start time from FIRST record header
                 let actualStartMs = startDt.getTime();
                 const headerAny = records[0].header as any;
                 if (headerAny.start) {
@@ -381,7 +381,28 @@ export class SeismicEngine {
                 }
                 state.dataStartTime = actualStartMs;
 
-                state.lastFetchTime = endDt.getTime();
+                // Compute actual data end time from the LAST record header + its duration
+                let actualEndMs = endDt.getTime();
+                const lastRec = records[records.length - 1];
+                const lastHeaderAny = lastRec.header as any;
+                const lastRecDurationMs = (lastRec.header.numSamples / lastRec.header.sampleRate) * 1000;
+                if (lastHeaderAny.start) {
+                    const startObj = lastHeaderAny.start;
+                    let lastRecStartMs = 0;
+                    if (typeof startObj.toMillis === 'function') lastRecStartMs = startObj.toMillis();
+                    else if (typeof startObj.valueOf === 'function') lastRecStartMs = startObj.valueOf();
+                    else if (typeof startObj.getTime === 'function') lastRecStartMs = startObj.getTime();
+                    if (lastRecStartMs > 0) actualEndMs = lastRecStartMs + lastRecDurationMs;
+                } else if (lastHeaderAny.startTime) {
+                    const startObj = lastHeaderAny.startTime;
+                    let lastRecStartMs = 0;
+                    if (typeof startObj.toMillis === 'function') lastRecStartMs = startObj.toMillis();
+                    else if (typeof startObj.valueOf === 'function') lastRecStartMs = startObj.valueOf();
+                    else if (typeof startObj.getTime === 'function') lastRecStartMs = startObj.getTime();
+                    if (lastRecStartMs > 0) actualEndMs = lastRecStartMs + lastRecDurationMs;
+                }
+                
+                state.lastFetchTime = actualEndMs;
                 state.hasFailed = false;
                 
                 // compute maxAbs
@@ -431,7 +452,7 @@ export class SeismicEngine {
 
         const windowSec = this.getTimeWindowSeconds();
         const windowMs = windowSec * 1000;
-        let latencyMs = (this.timeframe === '24h' || this.timeframe === '3h') ? 15 * 60 * 1000 : 5 * 60 * 1000;
+        let latencyMs = (this.timeframe === '24h' || this.timeframe === '3h') ? 3 * 60 * 1000 : 2 * 60 * 1000;
         const logicalNow = state.lastFetchTime > 0 ? state.lastFetchTime : (Date.now() - latencyMs);
         
         let expectedRows = 1;
