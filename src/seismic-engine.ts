@@ -12,6 +12,7 @@ interface StationState {
     lpFilter: number;
     hasFailed: boolean;
     provider?: string;
+    channelCode?: string;
     isFetching: boolean;
     station: any;
     customGain: number;
@@ -412,6 +413,7 @@ export class SeismicEngine {
             
             if (cappedSamples > 0) {
                 state.sampleRate = firstSampleRate;
+                state.channelCode = records[0].header.channelCode;
                 state.rawFdsnBuffer = timeIndexedBuffer;
                 state.bufferZ = await this.applyFilterAsync(timeIndexedBuffer, firstSampleRate, state.hpFilter, state.lpFilter);
                 state.dataStartTime = actualStartMs;
@@ -724,6 +726,30 @@ export class SeismicEngine {
             } else {
                 tag.textContent = `Max: ±${displayMax} cnt | Datos: ${state.provider || 'N/A'}`;
             }
+        }
+        
+        // Update frequency range and sensor info dynamically based on fetched data
+        const rangeOverlay = document.getElementById(`range-overlay-${station.code}`);
+        const sensorMeta = document.getElementById(`sensor-meta-${station.code}`);
+        
+        if (rangeOverlay && state.sampleRate && !state.hasFailed) {
+            const nyquist = state.sampleRate / 2;
+            rangeOverlay.textContent = `Datos Reales: 0.01 - ${nyquist.toFixed(1)} Hz (${state.channelCode || '???'})`;
+        }
+        
+        if (sensorMeta && state.channelCode && !state.hasFailed) {
+            let sensorType = 'Desconocido';
+            const ch = state.channelCode.toUpperCase();
+            if (ch.startsWith('H') && ch.endsWith('Z')) {
+                sensorType = ch[1] === 'N' ? `Acelerógrafo (${ch})` : `Banda Ancha (${ch})`;
+            } else if (ch.startsWith('B') && ch.endsWith('Z')) {
+                sensorType = `Banda Ancha (${ch})`;
+            } else if (ch.startsWith('E') || ch.startsWith('S')) {
+                sensorType = ch[1] === 'N' ? `Acelerógrafo (${ch})` : `Corto Periodo (${ch})`;
+            } else {
+                sensorType = ch;
+            }
+            sensorMeta.innerHTML = `Sensor: <span>${sensorType} (${state.sampleRate} sps)</span>`;
         }
     }
 }

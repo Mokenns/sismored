@@ -525,7 +525,7 @@ class SismoRedApp {
 
                 <div class="oscilloscope-container" id="osc-container-${st.code}" style="min-height: 110px;">
                     <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" width="380" height="105" style="width:100%; display:block;"></canvas>
-                    <div class="oscilloscope-overlay">Rango Medido: ${rangeInfo.text}</div>
+                    <div class="oscilloscope-overlay" id="range-overlay-${st.code}">Rango Medido: ${rangeInfo.text}</div>
                     <div class="oscilloscope-pgv-tag" id="pgv-tag-${st.code}">Esperando datos...</div>
                 </div>
 
@@ -545,7 +545,7 @@ class SismoRedApp {
                 </div>
 
                 <div class="station-meta-grid">
-                    <div class="meta-item">Sensor: <span>${st.sensorClass === 'broadband' ? 'Banda Ancha' : (st.sensorClass === 'accelerometer' ? 'Acelerógrafo' : 'Corto Periodo')}</span></div>
+                    <div class="meta-item" id="sensor-meta-${st.code}">Sensor: <span>${st.sensorClass === 'broadband' ? 'Banda Ancha' : (st.sensorClass === 'accelerometer' ? 'Acelerógrafo' : 'Corto Periodo')}</span></div>
                     <div class="meta-item">Elevación: <span>${Math.round(st.elevation)} m</span></div>
                     <div class="meta-item">Longitud: <span>${st.lon.toFixed(3)}° W</span></div>
                     <div class="meta-item">Latitud: <span>${st.lat.toFixed(3)}° S</span></div>
