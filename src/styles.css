@@ -1052,9 +1052,10 @@ body {
 .filter-label { font-size: 0.72rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; }
 .clean-input { background: #111b30; color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 0.35rem 0.6rem; border-radius: 4px; font-size: 0.8rem; outline: none; }
 .clean-input:focus { border-color: #00d2ff; }
-#transect-view-container { display: flex; flex-direction: column; gap: 1.5rem; padding: 1.5rem; max-width: 1800px; margin: 0 auto; width: 100%; }
-.region-section { width: 100%; background: rgba(17, 27, 48, 0.45); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
-.stations-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); gap: 1rem; }
+#transect-view-container { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; padding: 1.5rem; max-width: 1800px; margin: 0 auto; width: 100%; }
+.region-section { flex: 1 1 380px; max-width: 100%; background: rgba(17, 27, 48, 0.45); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.region-section.region-wide { flex: 2 1 780px; }
+.stations-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 1rem; }
 .region-header { margin-bottom: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 0.5rem; }
 .region-name { font-size: 1.1rem; color: #f8fafc; font-weight: 700; }
 .dsp-controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.4rem; background: #060a12; padding: 0.4rem 0.5rem; border-radius: 4px; margin-bottom: 0.5rem; border: 1px solid rgba(255, 255, 255, 0.05); }
