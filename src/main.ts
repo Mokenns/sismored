@@ -12,18 +12,18 @@ declare global {
 
 function getStationFrequencyRange(st: any, tf: string) {
     if (tf === '24h' || tf === '3h') {
-        return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 2.0, hpStep: 0.005, lpDefault: 0.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.1 };
+        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 2.0, hpStep: 0.005, lpDefault: 5.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.1 };
     }
     if (st.network === 'IU' || st.network === 'II') {
-        return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 0.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.5 };
+        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 5.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.5 };
     }
     if (st.sensorClass === 'accelerometer' || (st.code && st.code.startsWith('GO'))) {
-        return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 0.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
+        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 5.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
     }
     if (st.sensorClass === 'short_period') {
-        return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 15.0, hpStep: 0.1, lpDefault: 0.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
+        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 15.0, hpStep: 0.1, lpDefault: 5.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
     }
-    return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 0.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
+    return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 5.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
 }
 
 class SismoRedApp {
