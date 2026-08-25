@@ -1,3 +1,7 @@
+// dsp-worker.ts
+// @ts-nocheck
+/// <reference lib="webworker" />
+
 function applyCosineTaper(data: Float32Array, taperFraction: number = 0.015) {
     const n = data.length;
     if (n < 10) return;

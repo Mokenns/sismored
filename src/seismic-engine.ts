@@ -362,7 +362,7 @@ export class SeismicEngine {
             
             // Pick the stream with the most data records (primary stream)
             let maxRecs = 0;
-            for (const [chanKey, recList] of channelMap.entries()) {
+            for (const [_chanKey, recList] of channelMap.entries()) {
                 if (recList.length > maxRecs) {
                     maxRecs = recList.length;
                     selectedRecords = recList;
