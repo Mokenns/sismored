@@ -351,66 +351,77 @@ export class SeismicEngine {
             }
             
             const records = miniseed.parseDataRecords(ab);
-            
-            let totalSamples = 0;
-            for (const r of records) totalSamples += r.header.numSamples;
-            
-            const rawSamples = new Float32Array(totalSamples);
-            let offset = 0;
-            for (const r of records) {
-                const dec = r.decompress();
-                rawSamples.set(dec, offset);
-                offset += dec.length;
+            if (records.length === 0) {
+                state.hasFailed = true;
+                throw new Error('No records in response');
             }
             
-            if (rawSamples.length > 0) {
-                state.sampleRate = records[0].header.sampleRate;
-                state.rawFdsnBuffer = rawSamples; 
-                state.bufferZ = await this.applyFilterAsync(rawSamples, state.sampleRate, state.hpFilter, state.lpFilter);
-                
-                // Use actual miniseed start time from FIRST record header
-                let actualStartMs = startDt.getTime();
-                const headerAny = records[0].header as any;
-                if (headerAny.start) {
-                    const startObj = headerAny.start;
-                    if (typeof startObj.toMillis === 'function') actualStartMs = startObj.toMillis();
-                    else if (typeof startObj.valueOf === 'function') actualStartMs = startObj.valueOf();
-                    else if (typeof startObj.getTime === 'function') actualStartMs = startObj.getTime();
-                } else if (headerAny.startTime) {
-                    const startObj = headerAny.startTime;
-                    if (typeof startObj.toMillis === 'function') actualStartMs = startObj.toMillis();
-                    else if (typeof startObj.valueOf === 'function') actualStartMs = startObj.valueOf();
-                    else if (typeof startObj.getTime === 'function') actualStartMs = startObj.getTime();
+            const firstSampleRate = records[0].header.sampleRate;
+            
+            // Helper: extract milliseconds from a miniseed header time object
+            const headerTimeMs = (header: any): number => {
+                for (const field of ['start', 'startTime']) {
+                    const obj = header[field];
+                    if (!obj) continue;
+                    if (typeof obj.toMillis === 'function') return obj.toMillis();
+                    if (typeof obj.getTime === 'function') return obj.getTime();
+                    if (typeof obj === 'number') return obj;
+                    const v = obj.valueOf?.();
+                    if (typeof v === 'number' && v > 1e12) return v; // epoch ms sanity check
                 }
+                return 0;
+            };
+            
+            // Determine actual time boundaries from record headers
+            let actualStartMs = headerTimeMs(records[0].header) || startDt.getTime();
+            
+            const lastRec = records[records.length - 1];
+            const lastRecStartMs = headerTimeMs(lastRec.header);
+            const lastRecDurationMs = (lastRec.header.numSamples / lastRec.header.sampleRate) * 1000;
+            let actualEndMs = lastRecStartMs > 0 
+                ? lastRecStartMs + lastRecDurationMs 
+                : endDt.getTime();
+            
+            // Sanity: ensure end > start
+            if (actualEndMs <= actualStartMs) actualEndMs = actualStartMs + (windowSec * 1000);
+            
+            // Build time-indexed buffer: each sample slot maps to a precise time
+            const totalDurationMs = actualEndMs - actualStartMs;
+            const totalSamplesNeeded = Math.ceil((totalDurationMs / 1000) * firstSampleRate);
+            
+            // Cap buffer size to prevent memory issues (max ~8M samples)
+            const maxSamples = 8_000_000;
+            const cappedSamples = Math.min(totalSamplesNeeded, maxSamples);
+            const timeIndexedBuffer = new Float32Array(cappedSamples); // zeros = gaps
+            
+            // Place each record's samples at their correct time position
+            for (const rec of records) {
+                const recStartMs = headerTimeMs(rec.header);
+                if (recStartMs <= 0) continue;
+                
+                const offsetMs = recStartMs - actualStartMs;
+                const offsetSamples = Math.round((offsetMs / 1000) * firstSampleRate);
+                
+                if (offsetSamples < 0 || offsetSamples >= cappedSamples) continue;
+                
+                const decoded = rec.decompress();
+                const copyLen = Math.min(decoded.length, cappedSamples - offsetSamples);
+                for (let i = 0; i < copyLen; i++) {
+                    timeIndexedBuffer[offsetSamples + i] = decoded[i];
+                }
+            }
+            
+            if (cappedSamples > 0) {
+                state.sampleRate = firstSampleRate;
+                state.rawFdsnBuffer = timeIndexedBuffer;
+                state.bufferZ = await this.applyFilterAsync(timeIndexedBuffer, firstSampleRate, state.hpFilter, state.lpFilter);
                 state.dataStartTime = actualStartMs;
-
-                // Compute actual data end time from the LAST record header + its duration
-                let actualEndMs = endDt.getTime();
-                const lastRec = records[records.length - 1];
-                const lastHeaderAny = lastRec.header as any;
-                const lastRecDurationMs = (lastRec.header.numSamples / lastRec.header.sampleRate) * 1000;
-                if (lastHeaderAny.start) {
-                    const startObj = lastHeaderAny.start;
-                    let lastRecStartMs = 0;
-                    if (typeof startObj.toMillis === 'function') lastRecStartMs = startObj.toMillis();
-                    else if (typeof startObj.valueOf === 'function') lastRecStartMs = startObj.valueOf();
-                    else if (typeof startObj.getTime === 'function') lastRecStartMs = startObj.getTime();
-                    if (lastRecStartMs > 0) actualEndMs = lastRecStartMs + lastRecDurationMs;
-                } else if (lastHeaderAny.startTime) {
-                    const startObj = lastHeaderAny.startTime;
-                    let lastRecStartMs = 0;
-                    if (typeof startObj.toMillis === 'function') lastRecStartMs = startObj.toMillis();
-                    else if (typeof startObj.valueOf === 'function') lastRecStartMs = startObj.valueOf();
-                    else if (typeof startObj.getTime === 'function') lastRecStartMs = startObj.getTime();
-                    if (lastRecStartMs > 0) actualEndMs = lastRecStartMs + lastRecDurationMs;
-                }
-                
                 state.lastFetchTime = actualEndMs;
                 state.hasFailed = false;
                 
                 // compute maxAbs
                 let m = 0;
-                for (let i=0; i<state.bufferZ.length; i++) {
+                for (let i = 0; i < state.bufferZ.length; i++) {
                     const v = Math.abs(state.bufferZ[i]);
                     if (v > m) m = v;
                 }
