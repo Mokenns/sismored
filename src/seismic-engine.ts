@@ -278,8 +278,7 @@ export class SeismicEngine {
                     addUrlsForCha('EHZ');
                     addUrlsForCha('SHZ');
                 } else {
-                    addUrlsForCha('LHZ');
-                    addUrlsForCha('BHZ');
+                    addUrlsForCha('BHZ'); // LHZ removed (anti-aliases local EQs)
                     addUrlsForCha('HHZ');
                 }
             } else if (this.timeframe === '3h') {
@@ -389,8 +388,8 @@ export class SeismicEngine {
             const totalDurationMs = actualEndMs - actualStartMs;
             const totalSamplesNeeded = Math.ceil((totalDurationMs / 1000) * firstSampleRate);
             
-            // Cap buffer size to prevent memory issues (max ~8M samples)
-            const maxSamples = 8_000_000;
+            // Cap buffer size to prevent memory issues (max ~12M samples)
+            const maxSamples = 12_000_000;
             const cappedSamples = Math.min(totalSamplesNeeded, maxSamples);
             const timeIndexedBuffer = new Float32Array(cappedSamples); // zeros = gaps
             
