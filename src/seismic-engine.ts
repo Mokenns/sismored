@@ -230,24 +230,9 @@ export class SeismicEngine {
             
             let net = station.network;
             let loc = '';
-            
             const channels = station.channels || [];
-            let cha = 'HHZ';
-            
-            if (this.timeframe === '24h' || this.timeframe === '3h') {
-                if (channels.includes('BHZ')) cha = 'BHZ';
-                else if (channels.includes('HHZ')) cha = 'HHZ';
-                else if (channels.includes('HNZ')) cha = 'HNZ';
-                else cha = channels.find((c: string) => c.endsWith('Z')) || 'BHZ';
-            } else {
-                if (channels.includes('HHZ')) cha = 'HHZ';
-                else if (channels.includes('HNZ')) cha = 'HNZ';
-                else if (channels.includes('BHZ')) cha = 'BHZ';
-                else cha = channels.find((c: string) => c.endsWith('Z')) || 'HHZ';
-            }
             
             let isWebicorder = false;
-            
             if (this.timeframe === '24h' || this.timeframe === '3h') {
                 latencyMs = 15 * 60 * 1000;
                 isWebicorder = true;
@@ -261,16 +246,46 @@ export class SeismicEngine {
             const endStr = endDt.toISOString().split('.')[0];
             
             const urls: string[] = [];
-            if (net === 'C') {
-                urls.push(`/api/csn/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${cha}&starttime=${startStr}&endtime=${endStr}`);
-                urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=C1&sta=${station.code}&loc=${loc}&cha=${cha}&starttime=${startStr}&endtime=${endStr}`);
-            } else if (net === 'AM') {
-                urls.push(`https://fdsnws.raspberryshakedata.com/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${cha}&starttime=${startStr}&endtime=${endStr}`);
-            } else if (net === 'GE') {
-                urls.push(`https://geofon.gfz-potsdam.de/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${cha}&starttime=${startStr}&endtime=${endStr}`);
-                urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${cha}&starttime=${startStr}&endtime=${endStr}`);
+            const addUrlsForCha = (channel: string) => {
+                if (net === 'C') {
+                    urls.push(`/api/csn/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=C1&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                } else if (net === 'C1') {
+                    urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                } else if (net === 'AM') {
+                    urls.push(`https://fdsnws.raspberryshakedata.com/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                } else if (net === 'GE') {
+                    urls.push(`https://geofon.gfz-potsdam.de/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                } else {
+                    urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                }
+            };
+
+            if (this.timeframe === '24h' || this.timeframe === '12h') {
+                if (net === 'AM') {
+                    addUrlsForCha('EHZ');
+                    addUrlsForCha('SHZ');
+                } else {
+                    addUrlsForCha('LHZ');
+                    addUrlsForCha('BHZ');
+                    addUrlsForCha('HHZ');
+                }
+            } else if (this.timeframe === '3h') {
+                if (net === 'AM') {
+                    addUrlsForCha('EHZ');
+                } else {
+                    addUrlsForCha('BHZ');
+                    addUrlsForCha('HHZ');
+                }
             } else {
-                urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${cha}&starttime=${startStr}&endtime=${endStr}`);
+                let cha = 'HHZ';
+                if (channels.includes('HHZ')) cha = 'HHZ';
+                else if (channels.includes('EHZ')) cha = 'EHZ';
+                else if (channels.includes('HNZ')) cha = 'HNZ';
+                else if (channels.includes('BHZ')) cha = 'BHZ';
+                else cha = channels.find((c: string) => c.endsWith('Z')) || 'HHZ';
+                addUrlsForCha(cha);
             }
 
             let ab: ArrayBuffer | null = null;

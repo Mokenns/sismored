@@ -7,6 +7,6 @@
 
 [[redirects]]
   from = "/api/csn/*"
-  to = "http://evtdb.csn.uchile.cl/fdsnws/dataselect/1/:splat"
+  to = "http://evtdb.csn.uchile.cl/:splat"
   status = 200
   force = true
