@@ -417,10 +417,33 @@ export class SeismicEngine {
         const ctx = canvas.getContext('2d')!;
         const dpr = window.devicePixelRatio || 1;
         
-        let numRows = 1;
-        if (this.timeframe === '24h') numRows = 24;
-        else if (this.timeframe === '12h') numRows = 12;
-        else if (this.timeframe === '3h') numRows = 6;
+        const state = this.getOrCreateStationState(station.code, station);
+        const buffer = state.bufferZ;
+        const bufLen = buffer.length;
+
+        const windowSec = this.getTimeWindowSeconds();
+        const windowMs = windowSec * 1000;
+        let latencyMs = (this.timeframe === '24h' || this.timeframe === '3h') ? 15 * 60 * 1000 : 5 * 60 * 1000;
+        const logicalNow = state.lastFetchTime > 0 ? state.lastFetchTime : (Date.now() - latencyMs);
+        
+        let expectedRows = 1;
+        if (this.timeframe === '24h') expectedRows = 24;
+        else if (this.timeframe === '12h') expectedRows = 12;
+        else if (this.timeframe === '3h') expectedRows = 6;
+        
+        let numRows = expectedRows;
+        let rowDurationMs = windowMs / expectedRows;
+
+        // Dynamic adjustment based on actual downloaded data duration
+        if (expectedRows > 1 && !state.hasFailed && state.dataStartTime > 0) {
+            const actualDurationMs = logicalNow - state.dataStartTime;
+            if (actualDurationMs > 0 && actualDurationMs < windowMs) {
+                numRows = Math.max(1, Math.ceil(actualDurationMs / rowDurationMs));
+            }
+        }
+        
+        const adaptedWindowMs = numRows * rowDurationMs;
+        const logicalWindowStart = logicalNow - adaptedWindowMs;
 
         const cssWidth = canvas.parentElement?.clientWidth || 380;
         const cssHeight = numRows > 1 ? (numRows * 50 + 20) : 105;
@@ -441,10 +464,6 @@ export class SeismicEngine {
         const width = cssWidth;
         const height = cssHeight;
 
-        const state = this.getOrCreateStationState(station.code, station);
-        const buffer = state.bufferZ;
-        const bufLen = buffer.length;
-
         ctx.fillStyle = '#060a12';
         ctx.fillRect(0, 0, width, height);
 
@@ -463,13 +482,6 @@ export class SeismicEngine {
             baseScale = (targetAmplitudePixels / 1000.0) * (this.globalGain / 3.0);
         }
         const effectiveScale = baseScale * (state.customGain || 1.0);
-
-        let latencyMs = (this.timeframe === '24h' || this.timeframe === '3h') ? 15 * 60 * 1000 : 5 * 60 * 1000;
-        const logicalNow = state.lastFetchTime > 0 ? state.lastFetchTime : (Date.now() - latencyMs);
-        const windowSec = this.getTimeWindowSeconds();
-        const windowMs = windowSec * 1000;
-        const logicalWindowStart = logicalNow - windowMs;
-        const rowDurationMs = windowMs / numRows;
 
         // X-axis interval (Density reduced)
         let tickIntervalSec = 30;

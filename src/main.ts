@@ -122,13 +122,19 @@ class SismoRedApp {
     }
 
     updateDisclaimerVisibility() {
+        const tf = this.engine.timeframe;
         const disclaimer = document.getElementById('hover-disclaimer');
-        if (disclaimer) {
-            if (this.engine.timeframe === '10s' || this.engine.timeframe === '1m' || this.engine.timeframe === '10m') {
-                disclaimer.style.display = 'block';
-            } else {
-                disclaimer.style.display = 'none';
-            }
+        if (tf === '10s' || tf === '1m' || tf === '10m') {
+            if (disclaimer) disclaimer.style.display = 'block';
+        } else {
+            if (disclaimer) disclaimer.style.display = 'none';
+        }
+        
+        const dataDisclaimer = document.getElementById('data-limit-disclaimer');
+        if (tf === '12h' || tf === '24h') {
+            if (dataDisclaimer) dataDisclaimer.style.display = 'block';
+        } else {
+            if (dataDisclaimer) dataDisclaimer.style.display = 'none';
         }
     }
 
