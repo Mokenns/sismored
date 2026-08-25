@@ -394,23 +394,65 @@ export class SeismicEngine {
             const cappedSamples = Math.min(totalSamplesNeeded, maxSamples);
             const timeIndexedBuffer = new Float32Array(cappedSamples); // zeros = gaps
             
-            // Calculate global mean of actual data to prevent gaps from becoming massive steps
-            let totalSum = 0;
+            // Calculate global trend (linear regression) to prevent massive drift
             let validSampleCount = 0;
+            let sumX = 0, sumY = 0;
             const decompressedRecords = [];
+            
+            // First pass: accumulate means
             for (const rec of records) {
                 const decoded = rec.decompress();
                 decompressedRecords.push(decoded);
-                for (let i = 0; i < decoded.length; i++) totalSum += decoded[i];
-                validSampleCount += decoded.length;
+                
+                const recStartMs = headerTimeMs(rec.header);
+                if (recStartMs <= 0) continue;
+                const offsetMs = recStartMs - actualStartMs;
+                const offsetSamples = Math.round((offsetMs / 1000) * firstSampleRate);
+                
+                for (let i = 0; i < decoded.length; i++) {
+                    sumX += (offsetSamples + i);
+                    sumY += decoded[i];
+                    validSampleCount++;
+                }
             }
-            const globalMean = validSampleCount > 0 ? (totalSum / validSampleCount) : 0;
             
-            // Place each record's samples at their correct time position, centered around 0
-            let recIdx = 0;
+            let slope = 0;
+            let intercept = 0;
+            if (validSampleCount > 1) {
+                const meanX = sumX / validSampleCount;
+                const meanY = sumY / validSampleCount;
+                
+                let num = 0, den = 0;
+                let recIdx = 0;
+                for (const rec of records) {
+                    const decoded = decompressedRecords[recIdx++];
+                    const recStartMs = headerTimeMs(rec.header);
+                    if (recStartMs <= 0) continue;
+                    const offsetMs = recStartMs - actualStartMs;
+                    const offsetSamples = Math.round((offsetMs / 1000) * firstSampleRate);
+                    
+                    for (let i = 0; i < decoded.length; i++) {
+                        const x = offsetSamples + i;
+                        const y = decoded[i];
+                        const dx = x - meanX;
+                        num += dx * (y - meanY);
+                        den += dx * dx;
+                    }
+                }
+                
+                if (den !== 0) {
+                    slope = num / den;
+                }
+                intercept = meanY - slope * meanX;
+            } else if (validSampleCount === 1) {
+                intercept = sumY;
+            }
+            
+            // Place each record's samples at their correct time position, fully detrended
+            let recIdx2 = 0;
             for (const rec of records) {
                 const recStartMs = headerTimeMs(rec.header);
-                const decoded = decompressedRecords[recIdx++];
+                const decoded = decompressedRecords[recIdx2++];
                 if (recStartMs <= 0) continue;
                 
                 const offsetMs = recStartMs - actualStartMs;
@@ -420,7 +462,8 @@ export class SeismicEngine {
                 
                 const copyLen = Math.min(decoded.length, cappedSamples - offsetSamples);
                 for (let i = 0; i < copyLen; i++) {
-                    timeIndexedBuffer[offsetSamples + i] = decoded[i] - globalMean;
+                    const x = offsetSamples + i;
+                    timeIndexedBuffer[x] = decoded[i] - (slope * x + intercept);
                 }
             }
             

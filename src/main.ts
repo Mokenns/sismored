@@ -12,18 +12,18 @@ declare global {
 
 function getStationFrequencyRange(st: any, tf: string) {
     if (tf === '24h' || tf === '3h') {
-        return { text: "0.01 - 10.0 Hz (Webicorder)", hpDefault: 0.1, hpMin: 0.005, hpMax: 2.0, hpStep: 0.005, lpDefault: 10.0, lpMin: 0.05, lpMax: 20.0, lpStep: 0.1 };
+        return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 2.0, hpStep: 0.005, lpDefault: 0.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.1 };
     }
     if (st.network === 'IU' || st.network === 'II') {
-        return { text: "0.0028 - 20.0 Hz (GSN 360s)", hpDefault: 0.1, hpMin: 0.01, hpMax: 10.0, hpStep: 0.05, lpDefault: 10.0, lpMin: 1.0, lpMax: 20.0, lpStep: 0.5 };
+        return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 0.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.5 };
     }
     if (st.sensorClass === 'accelerometer' || (st.code && st.code.startsWith('GO'))) {
-        return { text: "0.10 - 40.0 Hz (Acelerógrafo)", hpDefault: 1.0, hpMin: 0.05, hpMax: 10.0, hpStep: 0.05, lpDefault: 20.0, lpMin: 1.0, lpMax: 40.0, lpStep: 0.5 };
+        return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 0.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
     }
     if (st.sensorClass === 'short_period') {
-        return { text: "1.0 - 20.0 Hz (Corto Periodo)", hpDefault: 1.0, hpMin: 0.1, hpMax: 15.0, hpStep: 0.1, lpDefault: 15.0, lpMin: 2.0, lpMax: 40.0, lpStep: 0.5 };
+        return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 15.0, hpStep: 0.1, lpDefault: 0.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
     }
-    return { text: "0.0083 - 40.0 Hz (Banda Ancha 120s)", hpDefault: 0.5, hpMin: 0.01, hpMax: 10.0, hpStep: 0.05, lpDefault: 10.0, lpMin: 1.0, lpMax: 40.0, lpStep: 0.5 };
+    return { text: "RAW", hpDefault: 0.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 0.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
 }
 
 class SismoRedApp {
