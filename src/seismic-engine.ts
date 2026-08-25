@@ -449,6 +449,7 @@ export class SeismicEngine {
             }
             
             // Place each record's samples at their correct time position, fully detrended
+            let maxWrittenIndex = 0;
             let recIdx2 = 0;
             for (const rec of records) {
                 const recStartMs = headerTimeMs(rec.header);
@@ -465,13 +466,19 @@ export class SeismicEngine {
                     const x = offsetSamples + i;
                     timeIndexedBuffer[x] = decoded[i] - (slope * x + intercept);
                 }
+                maxWrittenIndex = Math.max(maxWrittenIndex, offsetSamples + copyLen);
             }
             
-            if (cappedSamples > 0) {
+            const finalBuffer = (maxWrittenIndex > 0 && maxWrittenIndex < cappedSamples)
+                ? timeIndexedBuffer.subarray(0, maxWrittenIndex)
+                : timeIndexedBuffer;
+            
+            if (finalBuffer.length > 0) {
+                actualEndMs = actualStartMs + Math.round((finalBuffer.length / firstSampleRate) * 1000);
                 state.sampleRate = firstSampleRate;
                 state.channelCode = records[0].header.chanCode;
-                state.rawFdsnBuffer = timeIndexedBuffer;
-                state.bufferZ = await this.applyFilterAsync(timeIndexedBuffer, firstSampleRate, state.hpFilter, state.lpFilter);
+                state.rawFdsnBuffer = finalBuffer;
+                state.bufferZ = await this.applyFilterAsync(finalBuffer, firstSampleRate, state.hpFilter, state.lpFilter);
                 state.dataStartTime = actualStartMs;
                 state.lastFetchTime = actualEndMs;
                 state.hasFailed = false;

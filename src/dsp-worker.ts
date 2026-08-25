@@ -94,26 +94,47 @@ function applyBandpass(data: Float32Array, sampleRate: number, hpFreq: number, l
     return current;
 }
 
-// Zero-phase forward-backward filtering using Direct Form II Transposed
+// Zero-phase forward-backward filtering using Direct Form II Transposed with SciPy-style odd extension padding
 function filtfilt(x: Float32Array, b0: number, b1: number, b2: number, a1: number, a2: number): Float32Array {
     const n = x.length;
     if (n <= 4) return x;
     
-    // Calculate true DC gain to find exact steady-state initial conditions
+    // Choose padding length based on signal size (up to 200 samples)
+    const padlen = Math.min(n - 1, Math.max(30, Math.min(300, Math.floor(n * 0.1))));
+    const extLen = n + 2 * padlen;
+    const ext = new Float64Array(extLen);
+    
+    // 1. Odd extension at start: 2*x[0] - x[padlen - i]
+    const x0 = x[0];
+    for (let i = 0; i < padlen; i++) {
+        ext[i] = 2 * x0 - x[padlen - i];
+    }
+    
+    // 2. Original data in center
+    for (let i = 0; i < n; i++) {
+        ext[padlen + i] = x[i];
+    }
+    
+    // 3. Odd extension at end: 2*x[n-1] - x[n - 2 - i]
+    const xEnd = x[n - 1];
+    for (let i = 0; i < padlen; i++) {
+        ext[padlen + n + i] = 2 * xEnd - x[n - 2 - i];
+    }
+    
+    // Calculate DC gain for boundary initialization
     const dcGain = (b0 + b1 + b2) / (1 + a1 + a2);
     
     // Forward pass
-    const yForward = new Float64Array(n);
+    const yForward = new Float64Array(extLen);
     let z1 = 0.0, z2 = 0.0;
     
-    // Initialize filter state with exact steady-state for a step input
-    const x0 = x[0];
-    const y0 = x0 * dcGain;
-    z1 = x0 * (b1 + b2) - y0 * (a1 + a2);
-    z2 = x0 * b2 - y0 * a2;
+    const startVal = ext[0];
+    const yStart = startVal * dcGain;
+    z1 = startVal * (b1 + b2) - yStart * (a1 + a2);
+    z2 = startVal * b2 - yStart * a2;
     
-    for (let i = 0; i < n; i++) {
-        const xi = x[i];
+    for (let i = 0; i < extLen; i++) {
+        const xi = ext[i];
         const yi = b0 * xi + z1;
         z1 = b1 * xi - a1 * yi + z2;
         z2 = b2 * xi - a2 * yi;
@@ -121,13 +142,13 @@ function filtfilt(x: Float32Array, b0: number, b1: number, b2: number, a1: numbe
     }
     
     // Backward pass
-    const yBackward = new Float64Array(n);
-    const lastY = yForward[n - 1];
-    const yLast = lastY * dcGain;
-    z1 = lastY * (b1 + b2) - yLast * (a1 + a2);
-    z2 = lastY * b2 - yLast * a2;
+    const yBackward = new Float64Array(extLen);
+    const lastVal = yForward[extLen - 1];
+    const yLast = lastVal * dcGain;
+    z1 = lastVal * (b1 + b2) - yLast * (a1 + a2);
+    z2 = lastVal * b2 - yLast * a2;
     
-    for (let i = n - 1; i >= 0; i--) {
+    for (let i = extLen - 1; i >= 0; i--) {
         const xi = yForward[i];
         const yi = b0 * xi + z1;
         z1 = b1 * xi - a1 * yi + z2;
@@ -135,10 +156,11 @@ function filtfilt(x: Float32Array, b0: number, b1: number, b2: number, a1: numbe
         yBackward[i] = yi;
     }
     
-    // Convert back to Float32Array
+    // Extract central original segment without edge padding artifacts
     const out = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-        out[i] = isNaN(yBackward[i]) ? 0 : yBackward[i];
+        const v = yBackward[padlen + i];
+        out[i] = isNaN(v) ? 0 : v;
     }
     return out;
 }
