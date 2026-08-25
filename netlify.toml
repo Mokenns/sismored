@@ -1,0 +1,5 @@
+[[redirects]]
+  from = "/api/csn/*"
+  to = "http://evtdb.csn.uchile.cl/fdsnws/dataselect/1/:splat"
+  status = 200
+  force = true

@@ -12329,6 +12329,6 @@ if (typeof window !== 'undefined') {
     window.getStationsByNetwork = getStationsByNetwork;
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { CHILE_REGIONS, CHILE_STATIONS, STATIONS_BY_REGION, getStationById, getStationsByRegion };
-}
+
+
+export { CHILE_REGIONS, STATIONS_BY_REGION, getStationById };

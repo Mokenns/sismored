@@ -1,0 +1,6 @@
+- **Stack:** TypeScript, Vite, HTML5 Canvas 2D / uPlot, Leaflet.
+- **Data Standards:** FDSNWS Dataselect & Station web services (CSN Chile, USGS, IRIS).
+- **Data Handling:**
+  - Time stamps must always parse as UTC internally and display with `America/Santiago` local time on labels.
+  - Apply Demean (DC offset removal) and a 4th-order Butterworth bandpass filter (0.1 Hz - 10.0 Hz) prior to rendering raw counts.
+- **Performance:** Maintain 60 FPS across multi-station feeds using layered canvases and dirty-flag rendering.

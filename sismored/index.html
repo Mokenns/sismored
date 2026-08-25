@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SismoRed Chile | Telemetría FDSN en Tiempo Real</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700;800&display=swap"
+        rel="stylesheet">
+
+
+</head>
+
+<body>
+    <header class="header-observatory">
+        <div class="header-container">
+            <div class="brand-section">
+                <div class="brand-icon">📈</div>
+                <div>
+                    <div class="brand-title">SismoRed Chile</div>
+                    <div class="brand-subtitle">Telemetría FDSNWS Cruda en Tiempo Real</div>
+                </div>
+            </div>
+            <div class="header-controls">
+                <div class="pill-status">
+                    <div class="pulse-dot"></div>
+                    <span id="live-time-display">Cargando Reloj...</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="top-nav-bar">
+        <div style="display:flex; gap:1.5rem; align-items:center; flex-wrap:wrap;">
+            <div class="filter-group">
+                <div class="filter-label">Región:</div>
+                <select class="clean-input" id="region-selector">
+                    <!-- JS fills this -->
+                </select>
+            </div>
+
+
+
+            <div class="filter-group">
+                <input type="text" id="search-stations" class="clean-input" placeholder="🔍 Buscar estación..."
+                    style="width: 200px;">
+            </div>
+        </div>
+
+        <div style="display:flex; gap:1.5rem; align-items:center; flex-wrap:wrap;">
+            <div class="timeframe-group">
+                <span class="filter-label" style="margin-right:0.2rem;">Tiempo:</span>
+                <button class="btn-timeframe" data-timeframe="10s">10s</button>
+                <button class="btn-timeframe active" data-timeframe="1m">1m</button>
+                <button class="btn-timeframe" data-timeframe="10m">10m</button>
+                <button class="btn-timeframe" data-timeframe="1h">1h</button>
+                <button class="btn-timeframe" data-timeframe="3h">3h</button>
+                <button class="btn-timeframe btn-24h" data-timeframe="24h">24h (Webicorder)</button>
+            </div>
+
+            <div class="scale-group">
+                <button class="btn-autoscale active" id="btn-autoscale-toggle" style="margin-right: 0.5rem;">✨
+                    Auto-Escala: ON</button>
+                <div class="scale-slider-container">
+                    <input type="range" class="scale-slider" id="scale-gain-slider" min="0.1" max="25" step="0.1"
+                        value="3.0">
+                    <span id="scale-slider-val">3.0x</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main View without Sidebar -->
+    <main class="main-layout" style="height: calc(100vh - 125px); overflow-y: auto; background: #0c1322;">
+        <div id="hover-disclaimer" style="text-align: center; color: #0ea5e9; font-size: 0.85rem; padding: 0.75rem; background: rgba(14, 165, 233, 0.1); border-bottom: 1px solid rgba(14, 165, 233, 0.2); display: none;">
+            💡 <strong>Modo de Alta Frecuencia:</strong> Mueve el mouse sobre una región para ver actualizaciones más rápidas.
+        </div>
+        <div id="transect-view-container" style="padding: 1.5rem; max-width: 1800px; margin: 0 auto;">
+            <!-- JS will populate stations here -->
+        </div>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>
