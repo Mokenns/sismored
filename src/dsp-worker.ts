@@ -1,6 +1,13 @@
-// dsp-worker.ts
-// @ts-nocheck
-/// <reference lib="webworker" />
+function applyCosineTaper(data: Float32Array, taperFraction: number = 0.015) {
+    const n = data.length;
+    if (n < 10) return;
+    const taperLen = Math.min(Math.floor(n / 2), Math.max(10, Math.floor(n * taperFraction)));
+    for (let i = 0; i < taperLen; i++) {
+        const factor = 0.5 * (1 - Math.cos((Math.PI * i) / taperLen));
+        data[i] *= factor;
+        data[n - 1 - i] *= factor;
+    }
+}
 
 self.onmessage = function(e: MessageEvent) {
     const { id, rawData, sampleRate, hpFreq, lpFreq, applyDemean } = e.data;
@@ -38,6 +45,9 @@ self.onmessage = function(e: MessageEvent) {
             }
         }
     }
+    
+    // Apply smooth cosine taper to boundaries (standard in GlobalQuake, ObsPy, SAC)
+    applyCosineTaper(data, 0.015);
     
     // 3. Robust zero-phase Butterworth filtering (Direct Form II Transposed)
     data = applyBandpass(data, sampleRate, hpFreq, lpFreq);

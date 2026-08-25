@@ -350,16 +350,40 @@ export class SeismicEngine {
                 throw lastError || new Error('No data found across all providers');
             }
             
-            const records = miniseed.parseDataRecords(ab);
-            if (records.length === 0) {
+            const rawRecords = miniseed.parseDataRecords(ab);
+            if (rawRecords.length === 0) {
                 state.hasFailed = true;
                 throw new Error('No records in response');
             }
             
-            const firstSampleRate = records[0].header.sampleRate;
+            // Separate streams by channel identifier (net.sta.loc.cha) to prevent mixed location codes (e.g. 00 vs 10)
+            const channelMap = miniseed.byChannel(rawRecords);
+            let selectedRecords: any[] = [];
+            
+            // Pick the stream with the most data records (primary stream)
+            let maxRecs = 0;
+            for (const [chanKey, recList] of channelMap.entries()) {
+                if (recList.length > maxRecs) {
+                    maxRecs = recList.length;
+                    selectedRecords = recList;
+                }
+            }
+            if (selectedRecords.length === 0) selectedRecords = rawRecords;
+            
+            // Sort records chronologically
+            selectedRecords.sort((a, b) => {
+                const tA = a.header?.startTime?.toMillis?.() || a.header?.startBTime?.toDateTime?.()?.toMillis?.() || 0;
+                const tB = b.header?.startTime?.toMillis?.() || b.header?.startBTime?.toDateTime?.()?.toMillis?.() || 0;
+                return tA - tB;
+            });
+            
+            const firstSampleRate = selectedRecords[0].header.sampleRate;
             
             // Helper: extract milliseconds from a miniseed header time object
             const headerTimeMs = (header: any): number => {
+                if (!header) return 0;
+                if (header.startTime?.toMillis) return header.startTime.toMillis();
+                if (header.startBTime?.toDateTime) return header.startBTime.toDateTime().toMillis();
                 for (const field of ['start', 'startTime']) {
                     const obj = header[field];
                     if (!obj) continue;
@@ -367,15 +391,15 @@ export class SeismicEngine {
                     if (typeof obj.getTime === 'function') return obj.getTime();
                     if (typeof obj === 'number') return obj;
                     const v = obj.valueOf?.();
-                    if (typeof v === 'number' && v > 1e12) return v; // epoch ms sanity check
+                    if (typeof v === 'number' && v > 1e12) return v;
                 }
                 return 0;
             };
             
-            // Determine actual time boundaries from record headers
-            let actualStartMs = headerTimeMs(records[0].header) || startDt.getTime();
+            // Determine actual time boundaries from sorted record headers
+            let actualStartMs = headerTimeMs(selectedRecords[0].header) || startDt.getTime();
             
-            const lastRec = records[records.length - 1];
+            const lastRec = selectedRecords[selectedRecords.length - 1];
             const lastRecStartMs = headerTimeMs(lastRec.header);
             const lastRecDurationMs = (lastRec.header.numSamples / lastRec.header.sampleRate) * 1000;
             let actualEndMs = lastRecStartMs > 0 
@@ -400,7 +424,7 @@ export class SeismicEngine {
             const decompressedRecords = [];
             
             // First pass: accumulate means
-            for (const rec of records) {
+            for (const rec of selectedRecords) {
                 const decoded = rec.decompress();
                 decompressedRecords.push(decoded);
                 
@@ -424,7 +448,7 @@ export class SeismicEngine {
                 
                 let num = 0, den = 0;
                 let recIdx = 0;
-                for (const rec of records) {
+                for (const rec of selectedRecords) {
                     const decoded = decompressedRecords[recIdx++];
                     const recStartMs = headerTimeMs(rec.header);
                     if (recStartMs <= 0) continue;
@@ -451,7 +475,7 @@ export class SeismicEngine {
             // Place each record's samples at their correct time position, fully detrended
             let maxWrittenIndex = 0;
             let recIdx2 = 0;
-            for (const rec of records) {
+            for (const rec of selectedRecords) {
                 const recStartMs = headerTimeMs(rec.header);
                 const decoded = decompressedRecords[recIdx2++];
                 if (recStartMs <= 0) continue;
@@ -476,7 +500,7 @@ export class SeismicEngine {
             if (finalBuffer.length > 0) {
                 actualEndMs = actualStartMs + Math.round((finalBuffer.length / firstSampleRate) * 1000);
                 state.sampleRate = firstSampleRate;
-                state.channelCode = records[0].header.chanCode;
+                state.channelCode = selectedRecords[0].header.chanCode;
                 state.rawFdsnBuffer = finalBuffer;
                 state.bufferZ = await this.applyFilterAsync(finalBuffer, firstSampleRate, state.hpFilter, state.lpFilter);
                 state.dataStartTime = actualStartMs;
