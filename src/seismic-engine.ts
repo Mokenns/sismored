@@ -233,7 +233,7 @@ export class SeismicEngine {
         state.isFetching = true;
         
         try {
-            let latencyMs = 2 * 60 * 1000; // 2 minutes default latency
+            let latencyMs = 30 * 1000; // default 30s
             let windowSec = this.getTimeWindowSeconds();
             
             let net = station.network;
@@ -241,10 +241,13 @@ export class SeismicEngine {
             const channels = station.channels || [];
             
             let isWebicorder = false;
-            if (this.timeframe === '24h' || this.timeframe === '3h') {
-                latencyMs = 3 * 60 * 1000; // 3 minutes for webicorders
-                isWebicorder = true;
-            }
+            if (this.timeframe === '10s') latencyMs = 2 * 1000;
+            else if (this.timeframe === '1m') latencyMs = 5 * 1000;
+            else if (this.timeframe === '10m') latencyMs = 10 * 1000;
+            else if (this.timeframe === '1h') latencyMs = 30 * 1000;
+            else if (this.timeframe === '3h') { latencyMs = 3 * 60 * 1000; isWebicorder = true; }
+            else if (this.timeframe === '12h') { latencyMs = 3 * 60 * 1000; isWebicorder = true; }
+            else if (this.timeframe === '24h') { latencyMs = 3 * 60 * 1000; isWebicorder = true; }
             
             // FDSN delay padding
             const endDt = new Date(nowMs - latencyMs);
@@ -452,7 +455,12 @@ export class SeismicEngine {
 
         const windowSec = this.getTimeWindowSeconds();
         const windowMs = windowSec * 1000;
-        let latencyMs = (this.timeframe === '24h' || this.timeframe === '3h') ? 3 * 60 * 1000 : 2 * 60 * 1000;
+        let latencyMs = 30 * 1000;
+        if (this.timeframe === '10s') latencyMs = 2 * 1000;
+        else if (this.timeframe === '1m') latencyMs = 5 * 1000;
+        else if (this.timeframe === '10m') latencyMs = 10 * 1000;
+        else if (this.timeframe === '1h') latencyMs = 30 * 1000;
+        else if (this.timeframe === '3h' || this.timeframe === '12h' || this.timeframe === '24h') latencyMs = 3 * 60 * 1000;
         const logicalNow = state.lastFetchTime > 0 ? state.lastFetchTime : (Date.now() - latencyMs);
         
         let expectedRows = 1;
