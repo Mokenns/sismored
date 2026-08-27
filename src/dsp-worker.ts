@@ -56,9 +56,45 @@ self.onmessage = function(e: MessageEvent) {
     // 3. Robust zero-phase Butterworth filtering (Direct Form II Transposed)
     data = applyBandpass(data, sampleRate, hpFreq, lpFreq);
     
-    postMessage({ id, filteredData: data }, [data.buffer]);
+    // 4. Min-Max Decimation for Plotting
+    // If we have decimationFactor > 1, we compress the data but KEEP the peaks!
+    const decimationFactor = e.data.decimationFactor || 1;
+    let finalSampleRate = sampleRate;
+    
+    if (decimationFactor > 1 && data.length > decimationFactor * 2) {
+        const numChunks = Math.floor(data.length / decimationFactor);
+        const outLen = numChunks * 2;
+        const decimated = new Float32Array(outLen);
+        
+        for (let i = 0; i < numChunks; i++) {
+            const offset = i * decimationFactor;
+            let minVal = Infinity;
+            let maxVal = -Infinity;
+            let minIdx = -1;
+            let maxIdx = -1;
+            
+            for (let j = 0; j < decimationFactor; j++) {
+                const val = data[offset + j];
+                if (val < minVal) { minVal = val; minIdx = j; }
+                if (val > maxVal) { maxVal = val; maxIdx = j; }
+            }
+            
+            // Output them in the order they occurred in time to prevent phase scrambling
+            if (minIdx <= maxIdx) {
+                decimated[i * 2] = minVal;
+                decimated[i * 2 + 1] = maxVal;
+            } else {
+                decimated[i * 2] = maxVal;
+                decimated[i * 2 + 1] = minVal;
+            }
+        }
+        data = decimated;
+        // We output 2 samples for every `decimationFactor` original samples.
+        finalSampleRate = sampleRate * (2 / decimationFactor);
+    }
+    
+    postMessage({ id, filteredData: data, effectiveSampleRate: finalSampleRate }, [data.buffer]);
 };
-
 function applyBandpass(data: Float32Array, sampleRate: number, hpFreq: number, lpFreq: number): Float32Array {
     if (!sampleRate || sampleRate <= 0) return data;
     const nyquist = sampleRate * 0.499;

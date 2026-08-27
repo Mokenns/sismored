@@ -1,7 +1,11 @@
 import './styles.css';
 // @ts-ignore
-import { CHILE_REGIONS, STATIONS_BY_REGION, getStationById } from './stations-data.js';
+import { CHILE_REGIONS } from './stations-data.js';
 import { SeismicEngine } from './seismic-engine';
+import { Router } from './router/index';
+import { RegionView } from './views/RegionView';
+import { StationDetailView } from './views/StationDetailView';
+import { getStationFrequencyRange } from './components/StationCard';
 
 declare global {
     interface Window {
@@ -10,38 +14,17 @@ declare global {
     }
 }
 
-function getStationFrequencyRange(st: any, tf: string) {
-    if (tf === '24h' || tf === '3h') {
-        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 2.0, hpStep: 0.005, lpDefault: 5.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.1 };
-    }
-    if (st.network === 'IU' || st.network === 'II') {
-        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 5.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.5 };
-    }
-    if (st.sensorClass === 'accelerometer' || (st.code && st.code.startsWith('GO'))) {
-        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 5.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
-    }
-    if (st.sensorClass === 'short_period') {
-        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 15.0, hpStep: 0.1, lpDefault: 5.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
-    }
-    return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 5.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
-}
-
 class SismoRedApp {
-    activeRegion: string = 'all';
-    filterNetwork: string = 'all';
-    filterSensor: string = 'all';
-    searchQuery: string = '';
-    apiFreqFilter: string = 'broadband';
-    visibleCanvasMap: Map<HTMLCanvasElement, any> = new Map();
     engine: SeismicEngine;
-    hoveredRegionId: string | null = null;
-    visibleRegionIds: Set<string> = new Set();
+    router: Router;
+    currentView: any = null;
     isScrolling: boolean = false;
     scrollTimeout: any = null;
 
     constructor() {
         this.engine = new SeismicEngine();
         window.seismicEngine = this.engine;
+        this.router = new Router();
         
         this.init();
     }
@@ -53,72 +36,63 @@ class SismoRedApp {
         this.updateDisclaimerVisibility();
 
         setInterval(() => this.updateTimeClock(), 1000);
+
+        this.setupRoutes();
+        this.router.init();
+    }
+
+    setupRoutes() {
+        this.router.addRoute('/', () => {
+            this.router.navigate('#/timeframe/1m');
+        });
+
+        this.router.addRoute('/timeframe/:tf', (tf: string) => {
+            this.switchView(RegionView);
+            this.updateTimeframeButtons(tf);
+            this.engine.setTimeframe(tf);
+            this.currentView.render();
+            this.updateStationCardControlsForTimeframe(tf);
+            this.updateDisclaimerVisibility();
+        });
+
+        this.router.addRoute('/station/:code', (code: string) => {
+            this.switchView(StationDetailView, code);
+        });
+
+        this.router.addRoute('*', () => {
+            this.router.navigate('#/timeframe/1m');
+        });
+    }
+
+    switchView(ViewClass: any, ...args: any[]) {
+        if (this.currentView) {
+            if (this.currentView.destroy) this.currentView.destroy();
+        }
+        const container = document.getElementById('app-view');
+        if (container) container.innerHTML = '';
         
-        this.renderTransectView();
+        // Clear active canvases in engine when switching views
+        this.engine.setActiveCanvases(new Map());
 
-        // High frequency hovering loop
-        let fastPollCounter = 0;
-        setInterval(() => {
-            if (this.isScrolling) return;
-            fastPollCounter++;
-            const tf = this.engine.timeframe;
-            
-            let shouldPoll = false;
-            if (tf === '10s' && fastPollCounter % 1 === 0) shouldPoll = true;
-            if (tf === '1m' && fastPollCounter % 2 === 0) shouldPoll = true;
-            if (tf === '10m' && fastPollCounter % 5 === 0) shouldPoll = true;
+        if (ViewClass === RegionView) {
+            this.currentView = new ViewClass(this.engine, 'app-view', this);
+            const select = document.getElementById('region-selector') as HTMLSelectElement;
+            const search = document.getElementById('search-stations') as HTMLInputElement;
+            this.currentView.setFilters(select?.value || 'all', search?.value || '', 'all');
+        } else {
+            this.currentView = new ViewClass(this.engine, 'app-view', ...args);
+            this.currentView.render();
+        }
+    }
 
-            if (shouldPoll && this.visibleCanvasMap.size > 0) {
-                const isMobile = window.innerWidth <= 768;
-                const activeStations = Array.from(this.visibleCanvasMap.values()).filter(st => {
-                    const card = document.getElementById(`card-${st.network}_${st.code}`);
-                    if (!card) return false;
-                    const region = card.closest('.region-section');
-                    if (!region) return false;
-                    
-                    if (isMobile) {
-                        return this.visibleRegionIds.has(region.id);
-                    } else {
-                        return this.hoveredRegionId === region.id;
-                    }
-                });
-                
-                if (activeStations.length > 0) {
-                    this.engine.pollLiveFDSNForVisible(activeStations, false).then(() => {
-                        this.hideFailedStations(activeStations);
-                    });
-                }
+    updateTimeframeButtons(tf: string) {
+        document.querySelectorAll('.btn-timeframe').forEach(btn => {
+            if (btn.getAttribute('data-timeframe') === tf) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
             }
-        }, 1000);
-
-        // Regular Polling loop
-        setInterval(() => {
-            if (this.isScrolling) return;
-            const tf = this.engine.timeframe;
-            if (tf === '10s' || tf === '1m' || tf === '10m') {
-                return; // Low timeframes are handled exclusively by the high frequency loop
-            }
-
-            if (this.visibleCanvasMap.size > 0) {
-                const isMobile = window.innerWidth <= 768;
-                let stationsToPoll = Array.from(this.visibleCanvasMap.values());
-
-                if (isMobile) {
-                    stationsToPoll = stationsToPoll.filter(st => {
-                        const card = document.getElementById(`card-${st.network}_${st.code}`);
-                        if (!card) return false;
-                        const region = card.closest('.region-section');
-                        return region && this.visibleRegionIds.has(region.id);
-                    });
-                }
-                
-                if (stationsToPoll.length > 0) {
-                    this.engine.pollLiveFDSNForVisible(stationsToPoll, false).then(() => {
-                        this.hideFailedStations(stationsToPoll);
-                    });
-                }
-            }
-        }, 10000);
+        });
     }
 
     updateDisclaimerVisibility() {
@@ -146,9 +120,9 @@ class SismoRedApp {
                 if (card) {
                     card.style.display = 'none';
                     const canvas = document.querySelector(`.station-canvas-render[data-station-code="${st.code}"]`) as HTMLCanvasElement;
-                    if (canvas) {
-                        this.visibleCanvasMap.delete(canvas);
-                        this.engine.setActiveCanvases(this.visibleCanvasMap);
+                    if (canvas && this.currentView?.visibleCanvasMap) {
+                        this.currentView.visibleCanvasMap.delete(canvas);
+                        this.engine.setActiveCanvases(this.currentView.visibleCanvasMap);
                     }
                 }
             }
@@ -168,12 +142,14 @@ class SismoRedApp {
         }
 
         document.addEventListener('mouseover', (e: Event) => {
-            const target = e.target as HTMLElement;
-            const regionEl = target.closest('.region-section');
-            if (regionEl) {
-                this.hoveredRegionId = regionEl.id;
-            } else {
-                this.hoveredRegionId = null;
+            if (this.currentView instanceof RegionView) {
+                const target = e.target as HTMLElement;
+                const regionEl = target.closest('.region-section');
+                if (regionEl) {
+                    this.currentView.hoveredRegionId = regionEl.id;
+                } else {
+                    this.currentView.hoveredRegionId = null;
+                }
             }
         });
 
@@ -190,7 +166,6 @@ class SismoRedApp {
                 let hp = parseFloat(hpEl.value);
                 let lp = parseFloat(lpEl.value);
                 
-                // Keep passband valid: HP must be strictly less than LP
                 if (target.classList.contains('hp-slider')) {
                     if (hp >= lp) {
                         lp = Math.min(parseFloat(lpEl.max), hp + parseFloat(hpEl.step || '0.1'));
@@ -208,7 +183,6 @@ class SismoRedApp {
                 if (hpValSpan) hpValSpan.textContent = hp < 0.1 ? hp.toFixed(3) : hp.toFixed(2);
                 if (lpValSpan) lpValSpan.textContent = lp < 1.0 ? lp.toFixed(2) : lp.toFixed(1);
                 
-                // Debounce DSP filtering until slider stops
                 if (sliderTimers.has(`filter-${code}`)) clearTimeout(sliderTimers.get(`filter-${code}`));
                 sliderTimers.set(`filter-${code}`, setTimeout(() => {
                     this.engine.setStationFilter(code, hp, lp);
@@ -221,10 +195,8 @@ class SismoRedApp {
                 const gainValSpan = document.getElementById(`gain-val-${code}`);
                 if (gainValSpan) gainValSpan.textContent = `${gain.toFixed(1)}x`;
                 
-                // Update gain value internally without rendering
                 this.engine.setStationGain(code, gain, false);
 
-                // Debounce render until movement stops
                 if (sliderTimers.has(`gain-${code}`)) clearTimeout(sliderTimers.get(`gain-${code}`));
                 sliderTimers.set(`gain-${code}`, setTimeout(() => {
                     this.engine.renderStationCanvas(code);
@@ -303,26 +275,33 @@ class SismoRedApp {
 
         document.querySelectorAll('.btn-timeframe').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('.btn-timeframe').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
                 const tf = btn.getAttribute('data-timeframe')!;
-                this.engine.setTimeframe(tf);
-                this.updateStationCardControlsForTimeframe(tf);
-                this.updateDisclaimerVisibility();
-                
-                const visibleStations = Array.from(this.visibleCanvasMap.values());
-                this.engine.pollLiveFDSNForVisible(visibleStations, true).then(() => {
-                    this.hideFailedStations(visibleStations);
-                });
+                // If we are in RegionView, navigate to timeframe route
+                if (this.currentView instanceof RegionView) {
+                    this.router.navigate(`#/timeframe/${tf}`);
+                } else if (this.currentView instanceof StationDetailView) {
+                    // Update timeframe for detail view without leaving
+                    this.engine.setTimeframe(tf);
+                    this.updateTimeframeButtons(tf);
+                    this.currentView.render();
+                    this.updateStationCardControlsForTimeframe(tf);
+                    this.updateDisclaimerVisibility();
+                }
             });
         });
 
         const search = document.getElementById('search-stations') as HTMLInputElement;
-        if (search) search.addEventListener('input', (e) => { this.searchQuery = (e.target as HTMLInputElement).value.toLowerCase().trim(); this.applyFilters(); });
+        if (search) search.addEventListener('input', (e) => { 
+            if (this.currentView instanceof RegionView) {
+                this.currentView.searchQuery = (e.target as HTMLInputElement).value.toLowerCase().trim();
+                this.currentView.render();
+            }
+        });
     }
 
     updateStationCardControlsForTimeframe(tf: string) {
-        this.visibleCanvasMap.forEach((st) => {
+        if (!this.currentView || !this.currentView.visibleCanvasMap) return;
+        this.currentView.visibleCanvasMap.forEach((st: any) => {
             const rangeInfo = getStationFrequencyRange(st, tf);
             const overlay = document.querySelector(`#osc-container-${st.code} .oscilloscope-overlay`);
             if (overlay) {
@@ -361,27 +340,6 @@ class SismoRedApp {
         if (el) el.textContent = `${clt} CLT • ${utc} UTC (Tiempo Universal)`;
     }
 
-    applyFilters() {
-        this.renderTransectView();
-    }
-
-    filterStationList(list: any[]) {
-        return list.filter(st => {
-            if (st.network === 'AM' || st.network === 'GE' || st.network === 'CX') return false;
-            
-            if (this.filterSensor !== 'all' && st.sensorClass !== this.filterSensor) return false;
-            if (this.searchQuery) {
-                const q = this.searchQuery;
-                const matchCode = st.code.toLowerCase().includes(q);
-                const matchName = st.name.toLowerCase().includes(q);
-                const matchLoc = st.locality.toLowerCase().includes(q);
-                const matchNet = st.operator.toLowerCase().includes(q);
-                if (!matchCode && !matchName && !matchLoc && !matchNet) return false;
-            }
-            return true;
-        });
-    }
-
     renderRegionSidebar() {
         const select = document.getElementById('region-selector');
         if (!select) return;
@@ -391,167 +349,12 @@ class SismoRedApp {
             html += `<option value="${code}">${reg.roman} - ${reg.name}</option>`;
         });
         select.innerHTML = html;
-        select.addEventListener('change', (e) => this.selectRegion((e.target as HTMLSelectElement).value));
-    }
-
-    selectRegion(regCode: string) {
-        this.activeRegion = regCode;
-        this.renderTransectView();
-    }
-
-    renderTransectView() {
-        const container = document.getElementById('transect-view-container');
-        if (!container) return;
-
-        this.visibleCanvasMap.clear();
-
-        const regionsToRender = this.activeRegion === 'all'
-            ? Object.keys(CHILE_REGIONS)
-            : [this.activeRegion];
-
-        let html = '';
-
-        regionsToRender.forEach(regCode => {
-            const regInfo = CHILE_REGIONS[regCode];
-            const rawStations = STATIONS_BY_REGION[regCode] || [];
-            const filteredStations = this.filterStationList(rawStations);
-
-            if (filteredStations.length === 0) return;
-
-            const costaCount = filteredStations.filter(s => s.geomorphicZone === 'Costa').length;
-            const valleCount = filteredStations.filter(s => s.geomorphicZone === 'Valle').length;
-            const cordCount = filteredStations.filter(s => s.geomorphicZone === 'Cordillera').length;
-
-            const isWide = (filteredStations.length >= 4 || regionsToRender.length === 1);
-            const wideClass = isWide ? 'region-wide' : '';
-
-            html += `
-                <section class="region-section ${wideClass}" id="region-${regCode}">
-                    <div class="region-header">
-                        <h3 class="region-name">
-                            <span class="region-badge-roman">${regInfo.roman}</span>
-                            ${regInfo.name}
-                        </h3>
-                        <div class="region-transect-summary">
-                            <span class="zone-count-pill pill-costa">🌊 Costa: ${costaCount}</span>
-                            <span class="zone-count-pill pill-valle">🏙️ Valle: ${valleCount}</span>
-                            <span class="zone-count-pill pill-cordillera">🏔️ Cordillera: ${cordCount}</span>
-                        </div>
-                    </div>
-
-                    <div class="stations-grid">
-                        ${filteredStations.map(st => this.renderStationCardHtml(st)).join('')}
-                    </div>
-                </section>
-            `;
-        });
-
-        if (!html) {
-            html = `
-                <div class="region-section" style="text-align: center; padding: 3rem;">
-                    <h3>🔍 No se encontraron estaciones sismográficas</h3>
-                </div>
-            `;
-        }
-
-        container.innerHTML = html;
-
-        document.querySelectorAll('.station-canvas-render').forEach(canvas => {
-            const code = canvas.getAttribute('data-station-code')!;
-            const st = getStationById(code);
-            if (st) {
-                this.visibleCanvasMap.set(canvas as HTMLCanvasElement, st);
+        select.addEventListener('change', (e) => {
+            if (this.currentView instanceof RegionView) {
+                this.currentView.activeRegion = (e.target as HTMLSelectElement).value;
+                this.currentView.render();
             }
         });
-        
-        this.engine.setActiveCanvases(this.visibleCanvasMap);
-        
-        const visibleStations = Array.from(this.visibleCanvasMap.values());
-        this.engine.pollLiveFDSNForVisible(visibleStations, true).then(() => {
-            this.hideFailedStations(visibleStations);
-        });
-
-        // Setup IntersectionObserver for mobile performance optimization
-        if ((this as any)._regionObserver) {
-            (this as any)._regionObserver.disconnect();
-        }
-        
-        (this as any)._regionObserver = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    this.visibleRegionIds.add(entry.target.id);
-                } else {
-                    this.visibleRegionIds.delete(entry.target.id);
-                }
-            });
-        }, { rootMargin: '200px 0px' });
-
-        document.querySelectorAll('.region-section').forEach(el => {
-            (this as any)._regionObserver.observe(el);
-        });
-    }
-
-    renderStationCardHtml(st: any) {
-        let netClass = 'net-csn';
-        if (st.network === 'AM') netClass = 'net-rs';
-        else if (st.network === 'IU' || st.network === 'II') netClass = 'net-gsn';
-        else if (st.network === 'GE') netClass = 'net-geofon';
-
-        let zonePillClass = 'pill-costa';
-        let zoneIcon = '🌊';
-        if (st.geomorphicZone === 'Valle') {
-            zonePillClass = 'pill-valle';
-            zoneIcon = '🏙️';
-        } else if (st.geomorphicZone === 'Cordillera') {
-            zonePillClass = 'pill-cordillera';
-            zoneIcon = '🏔️';
-        }
-
-        const tf = this.engine.timeframe;
-        const rangeInfo = getStationFrequencyRange(st, tf);
-
-        return `
-            <article class="station-card" id="card-${st.network}_${st.code}">
-                <div class="station-card-header">
-                    <div>
-                        <div class="station-code-group">
-                            <span class="station-code">${st.code}</span>
-                            <span class="network-badge ${netClass}">${st.network}</span>
-                            <span class="zone-tag ${zonePillClass}">${zoneIcon} ${st.geomorphicZone}</span>
-                        </div>
-                        <div class="station-locality">${st.locality} (${st.operator.replace(' (CSN - U. de Chile)', '').replace(' Network', '')})</div>
-                    </div>
-                </div>
-
-                <div class="oscilloscope-container" id="osc-container-${st.code}" style="min-height: 110px;">
-                    <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" width="380" height="105" style="width:100%; display:block;"></canvas>
-                    <div class="oscilloscope-overlay" id="range-overlay-${st.code}">Rango Medido: ${rangeInfo.text}</div>
-                    <div class="oscilloscope-pgv-tag" id="pgv-tag-${st.code}">Esperando datos...</div>
-                </div>
-
-                <div class="dsp-controls">
-                    <div class="dsp-col">
-                        <label class="dsp-label">Filtro HP: <span id="hp-val-${st.code}">${rangeInfo.hpDefault < 0.1 ? rangeInfo.hpDefault.toFixed(3) : rangeInfo.hpDefault.toFixed(2)}</span> Hz</label>
-                        <input type="range" class="dsp-slider hp-slider" data-code="${st.code}" min="${rangeInfo.hpMin}" max="${rangeInfo.hpMax}" step="${rangeInfo.hpStep}" value="${rangeInfo.hpDefault}" style="accent-color:#0ea5e9;">
-                    </div>
-                    <div class="dsp-col">
-                        <label class="dsp-label">Filtro LP: <span id="lp-val-${st.code}">${rangeInfo.lpDefault < 1.0 ? rangeInfo.lpDefault.toFixed(2) : rangeInfo.lpDefault.toFixed(1)}</span> Hz</label>
-                        <input type="range" class="dsp-slider lp-slider" data-code="${st.code}" min="${rangeInfo.lpMin}" max="${rangeInfo.lpMax}" step="${rangeInfo.lpStep}" value="${rangeInfo.lpDefault}" style="accent-color:#f59e0b;">
-                    </div>
-                    <div class="dsp-col">
-                        <label class="dsp-label">Escala: <span id="gain-val-${st.code}">1.0x</span></label>
-                        <input type="range" class="dsp-slider gain-slider" data-code="${st.code}" min="0.2" max="5.0" step="0.1" value="1.0" style="accent-color:#10b981;">
-                    </div>
-                </div>
-
-                <div class="station-meta-grid">
-                    <div class="meta-item" id="sensor-meta-${st.code}">Sensor: <span>${st.sensorClass === 'broadband' ? 'Banda Ancha' : (st.sensorClass === 'accelerometer' ? 'Acelerógrafo' : 'Corto Periodo')}</span></div>
-                    <div class="meta-item">Elevación: <span>${Math.round(st.elevation)} m</span></div>
-                    <div class="meta-item">Longitud: <span>${st.lon.toFixed(3)}° W</span></div>
-                    <div class="meta-item">Latitud: <span>${st.lat.toFixed(3)}° S</span></div>
-                </div>
-            </article>
-        `;
     }
 }
 

@@ -5,6 +5,7 @@ interface StationState {
     bufferZ: Float32Array;
     rawFdsnBuffer: Float32Array;
     sampleRate: number;
+    renderSampleRate?: number;
     lastFetchTime: number;
     lastRequestTime: number;
     dataStartTime: number;
@@ -12,6 +13,7 @@ interface StationState {
     lpFilter: number;
     hasFailed: boolean;
     provider?: string;
+    successfulProviderUrlBase?: string;
     channelCode?: string;
     isFetching: boolean;
     station: any;
@@ -38,17 +40,18 @@ export class SeismicEngine {
         axisText: '#94a3b8'
     };
     
-    private pendingFilters: Map<number, (data: Float32Array) => void> = new Map();
+    private pendingFilters: Map<number, (data: { filteredData: Float32Array, effectiveSampleRate: number }) => void> = new Map();
     private filterMsgId: number = 0;
+    private currentPollSessionId: number = 0;
     
     private activeCanvases: Map<HTMLCanvasElement, any> = new Map();
 
     constructor() {
         this.dspWorker = new DspWorker();
         this.dspWorker.onmessage = (e) => {
-            const { id, filteredData } = e.data;
+            const { id, filteredData, effectiveSampleRate } = e.data;
             if (this.pendingFilters.has(id)) {
-                this.pendingFilters.get(id)!(filteredData);
+                this.pendingFilters.get(id)!({ filteredData, effectiveSampleRate });
                 this.pendingFilters.delete(id);
             }
         };
@@ -153,6 +156,9 @@ export class SeismicEngine {
         this.timeframe = tf;
         this.stationsState.forEach(state => {
             state.isFetching = false;
+            state.lastFetchTime = 0; // Reset fetch time so it forces a new fetch for the new window
+            state.bufferZ = new Float32Array(0); // Clear old buffer to prevent visual artifacts
+            state.rawFdsnBuffer = new Float32Array(0);
         });
         this.forceRender();
     }
@@ -175,7 +181,9 @@ export class SeismicEngine {
             state.hpFilter = hp;
             state.lpFilter = lp;
             if (state.rawFdsnBuffer && state.rawFdsnBuffer.length > 0) {
-                state.bufferZ = await this.applyFilterAsync(state.rawFdsnBuffer, state.sampleRate, hp, lp);
+                const result = await this.applyFilterAsync(state.rawFdsnBuffer, state.sampleRate, hp, lp);
+                state.bufferZ = result.filteredData;
+                state.renderSampleRate = result.effectiveSampleRate || state.sampleRate;
                 
                 let m = 0;
                 for (let i = 0; i < state.bufferZ.length; i++) {
@@ -189,17 +197,24 @@ export class SeismicEngine {
         }
     }
     
-    private applyFilterAsync(rawData: Float32Array, sampleRate: number, hpFreq: number, lpFreq: number): Promise<Float32Array> {
+    private applyFilterAsync(rawData: Float32Array, sampleRate: number, hpFreq: number, lpFreq: number): Promise<{ filteredData: Float32Array, effectiveSampleRate: number }> {
         return new Promise(resolve => {
             const id = ++this.filterMsgId;
             this.pendingFilters.set(id, resolve);
+            
+            let decimationFactor = 1;
+            if (this.timeframe === '3h') decimationFactor = 5;
+            else if (this.timeframe === '12h') decimationFactor = 10;
+            else if (this.timeframe === '24h') decimationFactor = 20;
+
             this.dspWorker.postMessage({
                 id,
                 rawData,
                 sampleRate,
                 hpFreq,
                 lpFreq,
-                applyDemean: false
+                applyDemean: false,
+                decimationFactor
             });
         });
     }
@@ -223,9 +238,9 @@ export class SeismicEngine {
         if (this.timeframe === '24h' || this.timeframe === '12h') cacheDuration = 300000; // 5 min
         else if (this.timeframe === '3h') cacheDuration = 120000; // 2 min
         else if (this.timeframe === '1h') cacheDuration = 60000; // 1 min
-        else if (this.timeframe === '10m') cacheDuration = 4500;
-        else if (this.timeframe === '1m') cacheDuration = 1500;
-        else if (this.timeframe === '10s') cacheDuration = 500;
+        else if (this.timeframe === '10m') cacheDuration = 4500; // 5s min refresh time
+        else if (this.timeframe === '1m') cacheDuration = 4500; // 5s min refresh time
+        else if (this.timeframe === '10s') cacheDuration = 4500; // 5s min refresh time
 
         if (!force && nowMs - state.lastRequestTime < cacheDuration) {
             return;
@@ -252,25 +267,56 @@ export class SeismicEngine {
             
             // FDSN delay padding
             const endDt = new Date(nowMs - latencyMs);
-            const startDt = new Date(endDt.getTime() - (windowSec * 1000));
+            let startDt = new Date(endDt.getTime() - (windowSec * 1000));
+
+            let isDelta = false;
+            let previousBuffer: Float32Array | null = null;
+            let previousStartMs = 0;
+
+            // Check if we can do a delta fetch to save bandwidth and speed up hover updates
+            if (!force && state.lastFetchTime > 0 && state.rawFdsnBuffer.length > 0 && !state.hasFailed && state.dataStartTime > 0) {
+                let overlapMs = 15000; 
+                if (this.timeframe === '10s') overlapMs = 2000;
+                else if (this.timeframe === '1m') overlapMs = 5000;
+                
+                const missingStartMs = state.lastFetchTime - overlapMs;
+                if (missingStartMs > startDt.getTime() && missingStartMs < endDt.getTime()) {
+                    startDt = new Date(missingStartMs);
+                    isDelta = true;
+                    previousBuffer = state.rawFdsnBuffer;
+                    previousStartMs = state.dataStartTime;
+                }
+            }
             
             const startStr = startDt.toISOString().split('.')[0];
             const endStr = endDt.toISOString().split('.')[0];
             
             const urls: string[] = [];
             const addUrlsForCha = (channel: string) => {
+                const baseUrls = [];
+                if (state.successfulProviderUrlBase) {
+                     let queryNet = net;
+                     if (net === 'C' && state.successfulProviderUrlBase.includes('earthscope')) queryNet = 'C1';
+                     baseUrls.push(`${state.successfulProviderUrlBase}?net=${queryNet}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                }
+                
                 if (net === 'C') {
-                    urls.push(`/api/csn/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
-                    urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=C1&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`/api/csn/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=C1&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
                 } else if (net === 'C1') {
-                    urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
                 } else if (net === 'AM') {
-                    urls.push(`https://fdsnws.raspberryshakedata.com/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://fdsnws.raspberryshakedata.com/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
                 } else if (net === 'GE') {
-                    urls.push(`https://geofon.gfz-potsdam.de/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
-                    urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://geofon.gfz-potsdam.de/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
                 } else {
-                    urls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                }
+
+                // Add to urls uniquely, preserving the successful provider at the very front
+                for (const u of baseUrls) {
+                     if (!urls.includes(u)) urls.push(u);
                 }
             };
 
@@ -318,6 +364,7 @@ export class SeismicEngine {
                                 const testRecords = miniseed.parseDataRecords(tempAb);
                                 if (testRecords.length > 0) {
                                     ab = tempAb;
+                                    state.successfulProviderUrlBase = url.split('?')[0];
                                     if (url.includes('api/csn')) state.provider = 'CSN (Proxy)';
                                     else if (url.includes('earthscope')) state.provider = 'EarthScope';
                                     else if (url.includes('raspberryshake')) state.provider = 'RaspberryShake';
@@ -346,6 +393,10 @@ export class SeismicEngine {
             }
 
             if (!ab) {
+                if (isDelta && previousBuffer) {
+                    // No new delta data (e.g. 204 No Content), but we have previous data. Just silently return and keep old data intact.
+                    return;
+                }
                 state.hasFailed = true;
                 throw lastError || new Error('No data found across all providers');
             }
@@ -497,13 +548,48 @@ export class SeismicEngine {
                 ? timeIndexedBuffer.subarray(0, maxWrittenIndex)
                 : timeIndexedBuffer;
             
-            if (finalBuffer.length > 0) {
-                actualEndMs = actualStartMs + Math.round((finalBuffer.length / firstSampleRate) * 1000);
+            let mergedBuffer: Float32Array;
+            let mergedStartMs: number;
+
+            if (isDelta && previousBuffer) {
+                const gapMs = actualStartMs - previousStartMs;
+                const gapSamples = Math.max(0, Math.round((gapMs / 1000) * firstSampleRate));
+                
+                const newTotalLength = gapSamples + finalBuffer.length;
+                const tempBuffer = new Float32Array(newTotalLength);
+                
+                // Copy previous buffer up to the point where the new buffer starts
+                const copyLen = Math.min(previousBuffer.length, gapSamples);
+                if (copyLen > 0) {
+                    tempBuffer.set(previousBuffer.subarray(0, copyLen), 0);
+                }
+                
+                // Append the new buffer (overwriting any overlap seamlessly)
+                tempBuffer.set(finalBuffer, gapSamples);
+                
+                // Truncate from the left to keep only windowSec worth of data to prevent memory leak
+                const maxSamples = windowSec * firstSampleRate;
+                if (tempBuffer.length > maxSamples) {
+                    mergedBuffer = tempBuffer.subarray(tempBuffer.length - maxSamples);
+                    mergedStartMs = actualEndMs - Math.round((mergedBuffer.length / firstSampleRate) * 1000);
+                } else {
+                    mergedBuffer = tempBuffer;
+                    mergedStartMs = previousStartMs;
+                }
+            } else {
+                mergedBuffer = finalBuffer;
+                mergedStartMs = actualStartMs;
+            }
+
+            if (mergedBuffer.length > 0) {
+                actualEndMs = mergedStartMs + Math.round((mergedBuffer.length / firstSampleRate) * 1000);
                 state.sampleRate = firstSampleRate;
                 state.channelCode = selectedRecords[0].header.chanCode;
-                state.rawFdsnBuffer = finalBuffer;
-                state.bufferZ = await this.applyFilterAsync(finalBuffer, firstSampleRate, state.hpFilter, state.lpFilter);
-                state.dataStartTime = actualStartMs;
+                state.rawFdsnBuffer = mergedBuffer;
+                const filterResult = await this.applyFilterAsync(mergedBuffer, firstSampleRate, state.hpFilter, state.lpFilter);
+                state.bufferZ = filterResult.filteredData;
+                state.renderSampleRate = filterResult.effectiveSampleRate || firstSampleRate;
+                state.dataStartTime = mergedStartMs;
                 state.lastFetchTime = actualEndMs;
                 state.hasFailed = false;
                 
@@ -526,19 +612,33 @@ export class SeismicEngine {
         }
     }
 
+    cancelActivePolling() {
+        this.currentPollSessionId++;
+    }
+
     async pollLiveFDSNForVisible(visibleStationsList: any[], isInitial = false) {
-        const nowMs = Date.now();
+        const sessionId = isInitial ? this.currentPollSessionId : ++this.currentPollSessionId;
+        
         if (isInitial) {
             const chunkSize = 6;
             for (let i = 0; i < visibleStationsList.length; i += chunkSize) {
                 const chunk = visibleStationsList.slice(i, i + chunkSize);
-                await Promise.all(chunk.map(st => this.fetchStationData(st, nowMs, true)));
+                await Promise.all(chunk.map(st => this.fetchStationData(st, Date.now(), true)));
             }
         } else {
             // Staggered updates
             for (let i = 0; i < visibleStationsList.length; i++) {
-                await this.fetchStationData(visibleStationsList[i], nowMs, false);
-                await new Promise(r => setTimeout(r, 400)); // 400ms time gap between station requests
+                if (this.currentPollSessionId !== sessionId) {
+                    // Polling was cancelled (e.g. user hovered a station or changed view)
+                    return;
+                }
+                await this.fetchStationData(visibleStationsList[i], Date.now(), false);
+                if (this.currentPollSessionId !== sessionId) {
+                    return;
+                }
+                if (visibleStationsList.length > 1) {
+                    await new Promise(r => setTimeout(r, 400)); // 400ms time gap between station requests
+                }
             }
         }
     }
@@ -747,9 +847,10 @@ export class SeismicEngine {
                 ctx.beginPath();
                 
                 // Segment of buffer that falls in this row
-                // t = state.dataStartTime + (i / state.sampleRate) * 1000
-                const startIndex = Math.max(0, Math.floor(((rowStartTime - state.dataStartTime) / 1000) * state.sampleRate));
-                const endIndex = Math.min(bufLen, Math.ceil(((rowEndTime - state.dataStartTime) / 1000) * state.sampleRate));
+                const activeSampleRate = state.renderSampleRate || state.sampleRate;
+                // t = state.dataStartTime + (i / activeSampleRate) * 1000
+                const startIndex = Math.max(0, Math.floor(((rowStartTime - state.dataStartTime) / 1000) * activeSampleRate));
+                const endIndex = Math.min(bufLen, Math.ceil(((rowEndTime - state.dataStartTime) / 1000) * activeSampleRate));
                 
                 if (startIndex < endIndex) {
                     const rowSamples = endIndex - startIndex;
@@ -757,7 +858,7 @@ export class SeismicEngine {
                     
                     if (ptsPerPixel <= 1) {
                         for (let i = startIndex; i < endIndex; i++) {
-                            const t = state.dataStartTime + (i / state.sampleRate) * 1000;
+                            const t = state.dataStartTime + (i / activeSampleRate) * 1000;
                             const x = padLeft + ((t - rowStartTime) / rowDurationMs) * plotWidth;
                             const y = plotCenterY - (buffer[i] * effectiveScale);
                             const clampedY = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, y));
