@@ -1,36 +1,17 @@
-export function getStationFrequencyRange(st: any, tf: string) {
-    if (tf === '24h' || tf === '3h') {
-        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 2.0, hpStep: 0.005, lpDefault: 5.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.1 };
-    }
-    if (st.network === 'IU' || st.network === 'II') {
-        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 5.0, lpMin: 0.0, lpMax: 20.0, lpStep: 0.5 };
-    }
-    if (st.sensorClass === 'accelerometer' || (st.code && st.code.startsWith('GO'))) {
-        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 5.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
-    }
-    if (st.sensorClass === 'short_period') {
-        return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 15.0, hpStep: 0.1, lpDefault: 5.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
-    }
-    return { text: "1.0 - 5.0 Hz", hpDefault: 1.0, hpMin: 0.0, hpMax: 10.0, hpStep: 0.05, lpDefault: 5.0, lpMin: 0.0, lpMax: 40.0, lpStep: 0.5 };
-}
+import {
+    getStationFrequencyRange,
+    getNetworkBadgeClass,
+    getGeomorphicZoneInfo,
+    getSensorClassLabel
+} from '../utils/station-helpers';
+
+export { getStationFrequencyRange };
 
 export function renderStationCardHtml(st: any, timeframe: string): string {
-    let netClass = 'net-csn';
-    if (st.network === 'AM') netClass = 'net-rs';
-    else if (st.network === 'IU' || st.network === 'II') netClass = 'net-gsn';
-    else if (st.network === 'GE') netClass = 'net-geofon';
-
-    let zonePillClass = 'pill-costa';
-    let zoneIcon = '🌊';
-    if (st.geomorphicZone === 'Valle') {
-        zonePillClass = 'pill-valle';
-        zoneIcon = '🏙️';
-    } else if (st.geomorphicZone === 'Cordillera') {
-        zonePillClass = 'pill-cordillera';
-        zoneIcon = '🏔️';
-    }
-
+    const netClass = getNetworkBadgeClass(st.network);
+    const { icon: zoneIcon, pillClass: zonePillClass } = getGeomorphicZoneInfo(st.geomorphicZone);
     const rangeInfo = getStationFrequencyRange(st, timeframe);
+    const sensorLabel = getSensorClassLabel(st.sensorClass);
 
     return `
         <article class="station-card" id="card-${st.network}_${st.code}">
@@ -69,7 +50,7 @@ export function renderStationCardHtml(st: any, timeframe: string): string {
             </div>
 
             <div class="station-meta-grid">
-                <div class="meta-item" id="sensor-meta-${st.code}">Sensor: <span>${st.sensorClass === 'broadband' ? 'Banda Ancha' : (st.sensorClass === 'accelerometer' ? 'Acelerógrafo' : 'Corto Periodo')}</span></div>
+                <div class="meta-item" id="sensor-meta-${st.code}">Sensor: <span>${sensorLabel}</span></div>
                 <div class="meta-item">Elevación: <span>${Math.round(st.elevation)} m</span></div>
                 <div class="meta-item">Longitud: <span>${st.lon.toFixed(3)}° W</span></div>
                 <div class="meta-item">Latitud: <span>${st.lat.toFixed(3)}° S</span></div>

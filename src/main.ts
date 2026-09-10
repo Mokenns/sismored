@@ -5,7 +5,8 @@ import { SeismicEngine } from './seismic-engine';
 import { Router } from './router/index';
 import { RegionView } from './views/RegionView';
 import { StationDetailView } from './views/StationDetailView';
-import { getStationFrequencyRange } from './components/StationCard';
+import { VALID_TIMEFRAMES, getTimeframeConfig } from './config/timeframes';
+import { getStationFrequencyRange } from './utils/station-helpers';
 
 declare global {
     interface Window {
@@ -49,8 +50,7 @@ class SismoRedApp {
 
         // Hierarchical Timeframe + Region route
         this.router.addRoute('/timeframe/:tf/region/:region', (tf: string, reg: string) => {
-            const validTfs = ['10s', '1m', '10m', '1h', '6h', '12h', '24h'];
-            const activeTf = validTfs.includes(tf) ? tf : '1m';
+            const activeTf = VALID_TIMEFRAMES.includes(tf) ? tf : '1m';
             const activeReg = reg || 'all';
 
             this.engine.setTimeframe(activeTf);
@@ -61,8 +61,7 @@ class SismoRedApp {
 
         // Hierarchical Timeframe + Station route (3-component view)
         this.router.addRoute('/timeframe/:tf/station/:code', (tf: string, code: string) => {
-            const validTfs = ['10s', '1m', '10m', '1h', '6h', '12h', '24h'];
-            const activeTf = validTfs.includes(tf) ? tf : '1m';
+            const activeTf = VALID_TIMEFRAMES.includes(tf) ? tf : '1m';
 
             this.engine.setTimeframe(activeTf);
             this.updateTimeframeButtons(activeTf);
@@ -129,15 +128,16 @@ class SismoRedApp {
 
     updateDisclaimerVisibility() {
         const tf = this.engine.timeframe;
+        const config = getTimeframeConfig(tf);
         const disclaimer = document.getElementById('hover-disclaimer');
-        if (tf === '10s' || tf === '1m' || tf === '10m') {
+        if (config.isHighFrequency) {
             if (disclaimer) disclaimer.style.display = 'block';
         } else {
             if (disclaimer) disclaimer.style.display = 'none';
         }
         
         const dataDisclaimer = document.getElementById('data-limit-disclaimer');
-        if (tf === '12h' || tf === '24h') {
+        if (config.isWebicorder) {
             if (dataDisclaimer) dataDisclaimer.style.display = 'block';
         } else {
             if (dataDisclaimer) dataDisclaimer.style.display = 'none';

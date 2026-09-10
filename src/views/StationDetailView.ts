@@ -1,7 +1,8 @@
 import { SeismicEngine } from '../seismic-engine';
 // @ts-ignore
 import { getStationById, CHILE_REGIONS } from '../stations-data.js';
-import { getStationFrequencyRange } from '../components/StationCard';
+import { getStationFrequencyRange, getNetworkBadgeClass, getGeomorphicZoneInfo } from '../utils/station-helpers';
+import { isHighFrequencyTimeframe } from '../config/timeframes';
 
 export class StationDetailView {
     engine: SeismicEngine;
@@ -34,21 +35,8 @@ export class StationDetailView {
 
         const regInfo = CHILE_REGIONS[st.regionCode] || { name: 'Región de Chile', roman: '' };
         const rangeInfo = getStationFrequencyRange(st, tf);
-
-        let netClass = 'net-csn';
-        if (st.network === 'AM') netClass = 'net-rs';
-        else if (st.network === 'IU' || st.network === 'II') netClass = 'net-gsn';
-        else if (st.network === 'GE') netClass = 'net-geofon';
-
-        let zoneIcon = '🌊';
-        let zonePillClass = 'pill-costa';
-        if (st.geomorphicZone === 'Valle') {
-            zoneIcon = '🏙️';
-            zonePillClass = 'pill-valle';
-        } else if (st.geomorphicZone === 'Cordillera') {
-            zoneIcon = '🏔️';
-            zonePillClass = 'pill-cordillera';
-        }
+        const netClass = getNetworkBadgeClass(st.network);
+        const { icon: zoneIcon, pillClass: zonePillClass } = getGeomorphicZoneInfo(st.geomorphicZone);
 
         this.container.innerHTML = `
             <div class="station-detail-container" style="max-width: 1400px; margin: 0 auto; padding: 1.2rem 1.5rem 3rem 1.5rem;">
@@ -201,7 +189,7 @@ export class StationDetailView {
         
         const doPoll = () => {
             const tf = this.engine.timeframe;
-            if (!['10s', '1m', '10m'].includes(tf)) return; // No auto-refresh for long timeframes
+            if (!isHighFrequencyTimeframe(tf)) return; // No auto-refresh for long timeframes
             
             const canvases = this.container.querySelectorAll('.station-canvas-render');
             if (canvases.length === 0) return; // View unmounted

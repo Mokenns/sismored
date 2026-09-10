@@ -2,6 +2,7 @@ import { SeismicEngine } from '../seismic-engine';
 // @ts-ignore
 import { CHILE_REGIONS, STATIONS_BY_REGION, getStationById } from '../stations-data.js';
 import { renderStationCardHtml } from '../components/StationCard';
+import { isHighFrequencyTimeframe } from '../config/timeframes';
 
 export class RegionView {
     engine: SeismicEngine;
@@ -57,7 +58,7 @@ export class RegionView {
 
         let html = '';
         const tf = this.engine.timeframe;
-        const isHighFrequency = ['10s', '1m', '10m'].includes(tf);
+        const isHighFrequency = isHighFrequencyTimeframe(tf);
 
         if (isHighFrequency && this.activeRegion === 'all') {
             // Directory View for high frequency / all regions
@@ -229,7 +230,7 @@ export class RegionView {
 
     triggerHoverPoll(st: any) {
         const tf = this.engine.timeframe;
-        if (!['10s', '1m', '10m'].includes(tf)) return;
+        if (!isHighFrequencyTimeframe(tf)) return;
 
         const state = this.engine.getOrCreateStationState(st.code, st);
         const now = Date.now();
@@ -251,7 +252,7 @@ export class RegionView {
             const tf = this.engine.timeframe;
             
             // Only auto-refresh high-frequency timeframes (10s, 1m, 10m)
-            if (!['10s', '1m', '10m'].includes(tf)) return;
+            if (!isHighFrequencyTimeframe(tf)) return;
             
             // Refresh every 5 seconds (5s minimum refresh time for 10s, 1m, and 10m)
             if (fastPollCounter % 5 !== 0) return;
