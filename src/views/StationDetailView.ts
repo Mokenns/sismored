@@ -141,8 +141,8 @@ export class StationDetailView {
                                 <span id="pgv-tag-${st.code}-Z" style="background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-family: monospace;">Esperando datos...</span>
                             </div>
                         </div>
-                        <div class="oscilloscope-container" style="height: 160px; min-height: 160px; position: relative;">
-                            <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-component="Z" height="160" style="width:100%; height:160px; display:block;"></canvas>
+                        <div class="oscilloscope-container" style="position: relative; height: 160px; min-height: 160px;">
+                            <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-component="Z" data-base-height="160" style="width:100%; display:block;"></canvas>
                         </div>
                     </div>
 
@@ -159,8 +159,8 @@ export class StationDetailView {
                                 <span id="pgv-tag-${st.code}-N" style="background: rgba(16, 185, 129, 0.1); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-family: monospace;">Esperando datos...</span>
                             </div>
                         </div>
-                        <div class="oscilloscope-container" style="height: 160px; min-height: 160px; position: relative;">
-                            <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-component="N" height="160" style="width:100%; height:160px; display:block;"></canvas>
+                        <div class="oscilloscope-container" style="position: relative; height: 160px; min-height: 160px;">
+                            <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-component="N" data-base-height="160" style="width:100%; display:block;"></canvas>
                         </div>
                     </div>
 
@@ -177,8 +177,8 @@ export class StationDetailView {
                                 <span id="pgv-tag-${st.code}-E" style="background: rgba(245, 158, 11, 0.1); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-family: monospace;">Esperando datos...</span>
                             </div>
                         </div>
-                        <div class="oscilloscope-container" style="height: 160px; min-height: 160px; position: relative;">
-                            <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-component="E" height="160" style="width:100%; height:160px; display:block;"></canvas>
+                        <div class="oscilloscope-container" style="position: relative; height: 160px; min-height: 160px;">
+                            <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-component="E" data-base-height="160" style="width:100%; display:block;"></canvas>
                         </div>
                     </div>
 

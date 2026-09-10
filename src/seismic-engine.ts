@@ -770,6 +770,7 @@ export class SeismicEngine {
             state.hasFailed = true;
         } finally {
             state.isFetching = false;
+            this.renderStationCanvas(station.code);
         }
     }
 
@@ -853,20 +854,27 @@ export class SeismicEngine {
         const logicalWindowStart = logicalNow - adaptedWindowMs;
 
         const cssWidth = canvas.parentElement?.clientWidth || 380;
-        const cssHeight = numRows > 1 ? (numRows * 50 + 20) : (canvas.getAttribute('height') ? parseInt(canvas.getAttribute('height')!) : 105);
+        const isDetailComponent = canvas.hasAttribute('data-component');
+        const baseHeight = canvas.getAttribute('data-base-height')
+            ? parseInt(canvas.getAttribute('data-base-height')!)
+            : (isDetailComponent ? 160 : 105);
+        const cssHeight = numRows > 1 ? (numRows * 50 + 20) : baseHeight;
         
         if (canvas.style.height !== cssHeight + 'px') {
             canvas.style.height = cssHeight + 'px';
             if (canvas.parentElement) {
+                canvas.parentElement.style.height = cssHeight + 'px';
                 canvas.parentElement.style.minHeight = cssHeight + 'px';
             }
         }
         
-        if (canvas.width !== cssWidth * dpr || canvas.height !== cssHeight * dpr) {
-            canvas.width = cssWidth * dpr;
-            canvas.height = cssHeight * dpr;
-            ctx.scale(dpr, dpr);
+        const targetWidth = Math.round(cssWidth * dpr);
+        const targetHeight = Math.round(cssHeight * dpr);
+        if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
         }
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         
         const width = cssWidth;
         const height = cssHeight;

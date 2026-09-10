@@ -48,7 +48,7 @@ export function renderStationCardHtml(st: any, timeframe: string): string {
             </div>
 
             <div class="oscilloscope-container" id="osc-container-${st.code}" style="min-height: 110px; cursor: pointer;" onclick="window.location.hash='#/timeframe/${timeframe}/station/${st.code}'">
-                <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" width="380" height="105" style="width:100%; display:block;"></canvas>
+                <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-base-height="105" style="width:100%; display:block;"></canvas>
                 <div class="oscilloscope-overlay" id="range-overlay-${st.code}">Rango Medido: ${rangeInfo.text}</div>
                 <div class="oscilloscope-pgv-tag" id="pgv-tag-${st.code}">Esperando datos...</div>
             </div>
