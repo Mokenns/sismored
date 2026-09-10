@@ -70,7 +70,7 @@ export class RegionView {
             Object.keys(CHILE_REGIONS).forEach(regCode => {
                 const regInfo = CHILE_REGIONS[regCode];
                 html += `
-                    <button class="region-select-btn" onclick="document.getElementById('region-selector').value='${regCode}'; document.getElementById('region-selector').dispatchEvent(new Event('change'))" style="background: #1e293b; border: 1px solid #334155; padding: 1.5rem; border-radius: 8px; cursor: pointer; text-align: left; transition: all 0.2s;">
+                    <button class="region-select-btn" onclick="window.location.hash='#/timeframe/${tf}/region/${regCode}'" style="background: #1e293b; border: 1px solid #334155; padding: 1.5rem; border-radius: 8px; cursor: pointer; text-align: left; transition: all 0.2s;">
                         <h3 style="margin: 0 0 0.5rem 0; color: #e2e8f0; font-size: 1.1rem;"><span style="color: #38bdf8; margin-right: 0.5rem;">${regInfo.roman}</span>${regInfo.name}</h3>
                         <p style="margin: 0; color: #94a3b8; font-size: 0.85rem;">Ingresar a la región →</p>
                     </button>
@@ -79,6 +79,24 @@ export class RegionView {
             html += `</div>`;
         } else {
             // Render specific region (or all regions for low frequency 1h, 3h, 24h)
+            if (this.activeRegion !== 'all') {
+                const curReg = CHILE_REGIONS[this.activeRegion];
+                if (curReg) {
+                    html += `
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; background: #0f172a; padding: 0.8rem 1.2rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08); flex-wrap: wrap; gap: 0.8rem;">
+                            <nav class="tree-breadcrumb" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem;">
+                                <a href="#/timeframe/${tf}/region/all" style="color: #38bdf8; text-decoration: none;">📡 SismoRed (${tf})</a>
+                                <span style="color: #475569;">/</span>
+                                <span style="color: #f8fafc; font-weight: 600;">📍 ${curReg.roman} - ${curReg.name}</span>
+                            </nav>
+                            <a href="#/timeframe/${tf}/region/all" style="padding: 0.4rem 0.9rem; background: #1e293b; color: #94a3b8; text-decoration: none; border-radius: 5px; font-size: 0.82rem; border: 1px solid #334155; transition: all 0.15s;">
+                                ← Todas las Regiones
+                            </a>
+                        </div>
+                    `;
+                }
+            }
+
             const regionsToRender = this.activeRegion === 'all'
                 ? Object.keys(CHILE_REGIONS)
                 : [this.activeRegion];

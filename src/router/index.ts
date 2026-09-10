@@ -11,23 +11,38 @@ export class Router {
     }
 
     handleHashChange() {
-        const fullHash = window.location.hash || '#/';
-        this.currentRoute = fullHash;
+        const rawHash = window.location.hash || '#/';
+        this.currentRoute = rawHash;
         
-        // Remove the '#' to match against our defined routes
-        const hashPath = fullHash.substring(1);
-        
+        // Remove '#' and query string for routing match
+        let hashPath = rawHash.replace(/^#/, '').split('?')[0].trim();
+        if (!hashPath.startsWith('/')) hashPath = '/' + hashPath;
+        if (hashPath.length > 1 && hashPath.endsWith('/')) {
+            hashPath = hashPath.slice(0, -1);
+        }
+
+        // Sort routes by specificity: deepest paths and static segments first
+        const routeKeys = Object.keys(this.routes).filter(k => k !== '*').sort((a, b) => {
+            const aSegments = a.split('/').filter(Boolean);
+            const bSegments = b.split('/').filter(Boolean);
+            if (bSegments.length !== aSegments.length) {
+                return bSegments.length - aSegments.length; // More segments first
+            }
+            // If same length, count non-param segments
+            const aStatic = aSegments.filter(s => !s.startsWith(':')).length;
+            const bStatic = bSegments.filter(s => !s.startsWith(':')).length;
+            return bStatic - aStatic;
+        });
+
         let matched = false;
-        for (const path in this.routes) {
-            if (path === '*') continue; // Skip wildcard during exact match
-            
-            const regexPath = path.replace(/:[a-zA-Z]+/g, '([^/]+)');
+        for (const path of routeKeys) {
+            const regexPath = path.replace(/:[a-zA-Z0-9_]+/g, '([^/]+)');
             const regex = new RegExp(`^${regexPath}$`);
             const match = hashPath.match(regex);
             
             if (match) {
                 matched = true;
-                const args = match.slice(1);
+                const args = match.slice(1).map(decodeURIComponent);
                 this.routes[path](...args);
                 break;
             }
@@ -39,6 +54,9 @@ export class Router {
     }
 
     navigate(hash: string) {
+        if (!hash.startsWith('#')) {
+            hash = '#' + hash;
+        }
         window.location.hash = hash;
     }
     

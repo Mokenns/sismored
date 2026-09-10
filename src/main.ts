@@ -42,25 +42,50 @@ class SismoRedApp {
     }
 
     setupRoutes() {
+        // Root redirect
         this.router.addRoute('/', () => {
-            this.router.navigate('#/timeframe/1m');
+            this.router.navigate('#/timeframe/1m/region/all');
         });
 
-        this.router.addRoute('/timeframe/:tf', (tf: string) => {
-            this.switchView(RegionView);
-            this.updateTimeframeButtons(tf);
-            this.engine.setTimeframe(tf);
-            this.currentView.render();
-            this.updateStationCardControlsForTimeframe(tf);
+        // Hierarchical Timeframe + Region route
+        this.router.addRoute('/timeframe/:tf/region/:region', (tf: string, reg: string) => {
+            const validTfs = ['10s', '1m', '10m', '1h', '6h', '12h', '24h'];
+            const activeTf = validTfs.includes(tf) ? tf : '1m';
+            const activeReg = reg || 'all';
+
+            this.engine.setTimeframe(activeTf);
+            this.updateTimeframeButtons(activeTf);
+            this.switchView(RegionView, activeReg);
             this.updateDisclaimerVisibility();
         });
 
-        this.router.addRoute('/station/:code', (code: string) => {
+        // Hierarchical Timeframe + Station route (3-component view)
+        this.router.addRoute('/timeframe/:tf/station/:code', (tf: string, code: string) => {
+            const validTfs = ['10s', '1m', '10m', '1h', '6h', '12h', '24h'];
+            const activeTf = validTfs.includes(tf) ? tf : '1m';
+
+            this.engine.setTimeframe(activeTf);
+            this.updateTimeframeButtons(activeTf);
             this.switchView(StationDetailView, code);
+            this.updateDisclaimerVisibility();
         });
 
+        // Aliases and legacy routes
+        this.router.addRoute('/timeframe/:tf', (tf: string) => {
+            this.router.navigate(`#/timeframe/${tf}/region/all`);
+        });
+
+        this.router.addRoute('/station/:code', (code: string) => {
+            this.router.navigate(`#/timeframe/1m/station/${code}`);
+        });
+
+        this.router.addRoute('/station/:code/:tf', (code: string, tf: string) => {
+            this.router.navigate(`#/timeframe/${tf}/station/${code}`);
+        });
+
+        // Catch-all
         this.router.addRoute('*', () => {
-            this.router.navigate('#/timeframe/1m');
+            this.router.navigate('#/timeframe/1m/region/all');
         });
     }
 
@@ -75,13 +100,20 @@ class SismoRedApp {
         this.engine.setActiveCanvases(new Map());
 
         if (ViewClass === RegionView) {
+            const targetRegion = args[0] || 'all';
             this.currentView = new ViewClass(this.engine, 'app-view', this);
             const select = document.getElementById('region-selector') as HTMLSelectElement;
             const search = document.getElementById('search-stations') as HTMLInputElement;
-            this.currentView.setFilters(select?.value || 'all', search?.value || '', 'all');
+            if (select) {
+                select.value = targetRegion;
+            }
+            this.currentView.setFilters(targetRegion, search?.value || '', 'all');
+            this.currentView.render();
+            this.updateStationCardControlsForTimeframe(this.engine.timeframe);
         } else {
             this.currentView = new ViewClass(this.engine, 'app-view', ...args);
             this.currentView.render();
+            this.updateStationCardControlsForTimeframe(this.engine.timeframe);
         }
     }
 
@@ -276,16 +308,14 @@ class SismoRedApp {
         document.querySelectorAll('.btn-timeframe').forEach(btn => {
             btn.addEventListener('click', () => {
                 const tf = btn.getAttribute('data-timeframe')!;
-                // If we are in RegionView, navigate to timeframe route
-                if (this.currentView instanceof RegionView) {
-                    this.router.navigate(`#/timeframe/${tf}`);
-                } else if (this.currentView instanceof StationDetailView) {
-                    // Update timeframe for detail view without leaving
-                    this.engine.setTimeframe(tf);
-                    this.updateTimeframeButtons(tf);
-                    this.currentView.render();
-                    this.updateStationCardControlsForTimeframe(tf);
-                    this.updateDisclaimerVisibility();
+                if (this.currentView instanceof StationDetailView) {
+                    const code = this.currentView.stationCode;
+                    this.router.navigate(`#/timeframe/${tf}/station/${code}`);
+                } else if (this.currentView instanceof RegionView) {
+                    const reg = this.currentView.activeRegion || 'all';
+                    this.router.navigate(`#/timeframe/${tf}/region/${reg}`);
+                } else {
+                    this.router.navigate(`#/timeframe/${tf}/region/all`);
                 }
             });
         });
@@ -350,10 +380,9 @@ class SismoRedApp {
         });
         select.innerHTML = html;
         select.addEventListener('change', (e) => {
-            if (this.currentView instanceof RegionView) {
-                this.currentView.activeRegion = (e.target as HTMLSelectElement).value;
-                this.currentView.render();
-            }
+            const regVal = (e.target as HTMLSelectElement).value;
+            const tf = this.engine.timeframe || '1m';
+            this.router.navigate(`#/timeframe/${tf}/region/${regVal}`);
         });
     }
 }

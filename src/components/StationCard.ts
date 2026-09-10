@@ -37,7 +37,7 @@ export function renderStationCardHtml(st: any, timeframe: string): string {
             <div class="station-card-header">
                 <div>
                     <div class="station-code-group">
-                        <a href="#/station/${st.code}" class="station-code-link" title="Ver detalle de estación" style="text-decoration: none; color: inherit;">
+                        <a href="#/timeframe/${timeframe}/station/${st.code}" class="station-code-link" title="Ver detalle de estación (3 componentes)" style="text-decoration: none; color: inherit;">
                             <span class="station-code">${st.code}</span>
                         </a>
                         <span class="network-badge ${netClass}">${st.network}</span>
@@ -47,7 +47,7 @@ export function renderStationCardHtml(st: any, timeframe: string): string {
                 </div>
             </div>
 
-            <div class="oscilloscope-container" id="osc-container-${st.code}" style="min-height: 110px; cursor: pointer;" onclick="window.location.hash='#/station/${st.code}'">
+            <div class="oscilloscope-container" id="osc-container-${st.code}" style="min-height: 110px; cursor: pointer;" onclick="window.location.hash='#/timeframe/${timeframe}/station/${st.code}'">
                 <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" width="380" height="105" style="width:100%; display:block;"></canvas>
                 <div class="oscilloscope-overlay" id="range-overlay-${st.code}">Rango Medido: ${rangeInfo.text}</div>
                 <div class="oscilloscope-pgv-tag" id="pgv-tag-${st.code}">Esperando datos...</div>

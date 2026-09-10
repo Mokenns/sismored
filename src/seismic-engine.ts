@@ -1,7 +1,20 @@
 import DspWorker from './dsp-worker?worker';
 import { miniseed } from 'seisplotjs';
 
-interface StationState {
+export interface ComponentTraceData {
+    channelCode: string;
+    component: 'Z' | 'N' | 'E';
+    componentLabel: string;
+    buffer: Float32Array;
+    rawBuffer: Float32Array;
+    sampleRate: number;
+    renderSampleRate?: number;
+    dataStartTime: number;
+    lastFetchTime: number;
+    maxAbs: number;
+}
+
+export interface StationState {
     bufferZ: Float32Array;
     rawFdsnBuffer: Float32Array;
     sampleRate: number;
@@ -19,6 +32,11 @@ interface StationState {
     station: any;
     customGain: number;
     maxAbs: number;
+    components: {
+        Z?: ComponentTraceData;
+        N?: ComponentTraceData; // North-South / Y
+        E?: ComponentTraceData; // East-West / X
+    };
 }
 
 export class SeismicEngine {
@@ -98,7 +116,8 @@ export class SeismicEngine {
                 isFetching: false,
                 station,
                 customGain: 1.0,
-                maxAbs: 1.0
+                maxAbs: 1.0,
+                components: {}
             });
         }
         return this.stationsState.get(stationId)!;
@@ -159,6 +178,7 @@ export class SeismicEngine {
             state.lastFetchTime = 0; // Reset fetch time so it forces a new fetch for the new window
             state.bufferZ = new Float32Array(0); // Clear old buffer to prevent visual artifacts
             state.rawFdsnBuffer = new Float32Array(0);
+            state.components = {};
         });
         this.forceRender();
     }
@@ -180,18 +200,74 @@ export class SeismicEngine {
         if (state) {
             state.hpFilter = hp;
             state.lpFilter = lp;
-            if (state.rawFdsnBuffer && state.rawFdsnBuffer.length > 0) {
-                const result = await this.applyFilterAsync(state.rawFdsnBuffer, state.sampleRate, hp, lp);
-                state.bufferZ = result.filteredData;
-                state.renderSampleRate = result.effectiveSampleRate || state.sampleRate;
-                
-                let m = 0;
-                for (let i = 0; i < state.bufferZ.length; i++) {
-                    const v = Math.abs(state.bufferZ[i]);
-                    if (v > m) m = v;
-                }
-                state.maxAbs = m;
-                
+            const filterPromises: Promise<any>[] = [];
+
+            // Filter Component Z
+            if (state.components?.Z?.rawBuffer && state.components.Z.rawBuffer.length > 0) {
+                filterPromises.push(
+                    this.applyFilterAsync(state.components.Z.rawBuffer, state.components.Z.sampleRate, hp, lp).then(res => {
+                        state.components.Z!.buffer = res.filteredData;
+                        state.components.Z!.renderSampleRate = res.effectiveSampleRate || state.components.Z!.sampleRate;
+                        state.bufferZ = res.filteredData;
+                        state.renderSampleRate = state.components.Z!.renderSampleRate;
+                        let m = 0;
+                        for (let i = 0; i < res.filteredData.length; i++) {
+                            const v = Math.abs(res.filteredData[i]);
+                            if (v > m) m = v;
+                        }
+                        state.components.Z!.maxAbs = m;
+                        state.maxAbs = m;
+                    })
+                );
+            } else if (state.rawFdsnBuffer && state.rawFdsnBuffer.length > 0) {
+                filterPromises.push(
+                    this.applyFilterAsync(state.rawFdsnBuffer, state.sampleRate, hp, lp).then(res => {
+                        state.bufferZ = res.filteredData;
+                        state.renderSampleRate = res.effectiveSampleRate || state.sampleRate;
+                        let m = 0;
+                        for (let i = 0; i < res.filteredData.length; i++) {
+                            const v = Math.abs(res.filteredData[i]);
+                            if (v > m) m = v;
+                        }
+                        state.maxAbs = m;
+                    })
+                );
+            }
+
+            // Filter Component N / Y
+            if (state.components?.N?.rawBuffer && state.components.N.rawBuffer.length > 0) {
+                filterPromises.push(
+                    this.applyFilterAsync(state.components.N.rawBuffer, state.components.N.sampleRate, hp, lp).then(res => {
+                        state.components.N!.buffer = res.filteredData;
+                        state.components.N!.renderSampleRate = res.effectiveSampleRate || state.components.N!.sampleRate;
+                        let m = 0;
+                        for (let i = 0; i < res.filteredData.length; i++) {
+                            const v = Math.abs(res.filteredData[i]);
+                            if (v > m) m = v;
+                        }
+                        state.components.N!.maxAbs = m;
+                    })
+                );
+            }
+
+            // Filter Component E / X
+            if (state.components?.E?.rawBuffer && state.components.E.rawBuffer.length > 0) {
+                filterPromises.push(
+                    this.applyFilterAsync(state.components.E.rawBuffer, state.components.E.sampleRate, hp, lp).then(res => {
+                        state.components.E!.buffer = res.filteredData;
+                        state.components.E!.renderSampleRate = res.effectiveSampleRate || state.components.E!.sampleRate;
+                        let m = 0;
+                        for (let i = 0; i < res.filteredData.length; i++) {
+                            const v = Math.abs(res.filteredData[i]);
+                            if (v > m) m = v;
+                        }
+                        state.components.E!.maxAbs = m;
+                    })
+                );
+            }
+
+            if (filterPromises.length > 0) {
+                await Promise.all(filterPromises);
                 this.renderStationCanvas(stationCode);
             }
         }
@@ -230,6 +306,169 @@ export class SeismicEngine {
         return 60;
     }
 
+    private processRecordStream(
+        records: any[],
+        previousBuffer: Float32Array | null,
+        previousStartMs: number,
+        startDtMs: number,
+        endDtMs: number,
+        windowSec: number,
+        isDelta: boolean
+    ): { rawBuffer: Float32Array; sampleRate: number; dataStartTime: number; lastFetchTime: number; chanCode: string } | null {
+        if (!records || records.length === 0) return null;
+
+        const headerTimeMs = (header: any): number => {
+            if (!header) return 0;
+            if (header.startTime?.toMillis) return header.startTime.toMillis();
+            if (header.startBTime?.toDateTime) return header.startBTime.toDateTime().toMillis();
+            for (const field of ['start', 'startTime']) {
+                const obj = header[field];
+                if (!obj) continue;
+                if (typeof obj.toMillis === 'function') return obj.toMillis();
+                if (typeof obj.getTime === 'function') return obj.getTime();
+                if (typeof obj === 'number') return obj;
+                const v = obj.valueOf?.();
+                if (typeof v === 'number' && v > 1e12) return v;
+            }
+            return 0;
+        };
+
+        records.sort((a, b) => headerTimeMs(a.header) - headerTimeMs(b.header));
+
+        const sampleRate = records[0].header.sampleRate;
+        const chanCode = records[0].header.chanCode;
+
+        let actualStartMs = headerTimeMs(records[0].header) || startDtMs;
+        const lastRec = records[records.length - 1];
+        const lastRecStartMs = headerTimeMs(lastRec.header);
+        const lastRecDurationMs = (lastRec.header.numSamples / lastRec.header.sampleRate) * 1000;
+        let actualEndMs = lastRecStartMs > 0 ? lastRecStartMs + lastRecDurationMs : endDtMs;
+
+        if (actualEndMs <= actualStartMs) actualEndMs = actualStartMs + (windowSec * 1000);
+
+        const totalDurationMs = actualEndMs - actualStartMs;
+        const totalSamplesNeeded = Math.ceil((totalDurationMs / 1000) * sampleRate);
+        const maxSamples = 12_000_000;
+        const cappedSamples = Math.min(totalSamplesNeeded, maxSamples);
+        const timeIndexedBuffer = new Float32Array(cappedSamples);
+
+        let validSampleCount = 0;
+        let sumX = 0, sumY = 0;
+        const decompressedRecords = [];
+
+        for (const rec of records) {
+            const decoded = rec.decompress();
+            decompressedRecords.push(decoded);
+
+            const recStartMs = headerTimeMs(rec.header);
+            if (recStartMs <= 0) continue;
+            const offsetMs = recStartMs - actualStartMs;
+            const offsetSamples = Math.round((offsetMs / 1000) * sampleRate);
+
+            for (let i = 0; i < decoded.length; i++) {
+                sumX += (offsetSamples + i);
+                sumY += decoded[i];
+                validSampleCount++;
+            }
+        }
+
+        let slope = 0;
+        let intercept = 0;
+        if (validSampleCount > 1) {
+            const meanX = sumX / validSampleCount;
+            const meanY = sumY / validSampleCount;
+
+            let num = 0, den = 0;
+            let recIdx = 0;
+            for (const rec of records) {
+                const decoded = decompressedRecords[recIdx++];
+                const recStartMs = headerTimeMs(rec.header);
+                if (recStartMs <= 0) continue;
+                const offsetMs = recStartMs - actualStartMs;
+                const offsetSamples = Math.round((offsetMs / 1000) * sampleRate);
+
+                for (let i = 0; i < decoded.length; i++) {
+                    const x = offsetSamples + i;
+                    const y = decoded[i];
+                    const dx = x - meanX;
+                    num += dx * (y - meanY);
+                    den += dx * dx;
+                }
+            }
+
+            if (den !== 0) {
+                slope = num / den;
+            }
+            intercept = meanY - slope * meanX;
+        } else if (validSampleCount === 1) {
+            intercept = sumY;
+        }
+
+        let maxWrittenIndex = 0;
+        let recIdx2 = 0;
+        for (const rec of records) {
+            const recStartMs = headerTimeMs(rec.header);
+            const decoded = decompressedRecords[recIdx2++];
+            if (recStartMs <= 0) continue;
+
+            const offsetMs = recStartMs - actualStartMs;
+            const offsetSamples = Math.round((offsetMs / 1000) * sampleRate);
+
+            if (offsetSamples < 0 || offsetSamples >= cappedSamples) continue;
+
+            const copyLen = Math.min(decoded.length, cappedSamples - offsetSamples);
+            for (let i = 0; i < copyLen; i++) {
+                const x = offsetSamples + i;
+                timeIndexedBuffer[x] = decoded[i] - (slope * x + intercept);
+            }
+            maxWrittenIndex = Math.max(maxWrittenIndex, offsetSamples + copyLen);
+        }
+
+        const finalBuffer = (maxWrittenIndex > 0 && maxWrittenIndex < cappedSamples)
+            ? timeIndexedBuffer.subarray(0, maxWrittenIndex)
+            : timeIndexedBuffer;
+
+        let mergedBuffer: Float32Array;
+        let mergedStartMs: number;
+
+        if (isDelta && previousBuffer && previousBuffer.length > 0) {
+            const gapMs = actualStartMs - previousStartMs;
+            const gapSamples = Math.max(0, Math.round((gapMs / 1000) * sampleRate));
+
+            const newTotalLength = gapSamples + finalBuffer.length;
+            const tempBuffer = new Float32Array(newTotalLength);
+
+            const copyLen = Math.min(previousBuffer.length, gapSamples);
+            if (copyLen > 0) {
+                tempBuffer.set(previousBuffer.subarray(0, copyLen), 0);
+            }
+
+            tempBuffer.set(finalBuffer, gapSamples);
+
+            const maxWindowSamples = windowSec * sampleRate;
+            if (tempBuffer.length > maxWindowSamples) {
+                mergedBuffer = tempBuffer.subarray(tempBuffer.length - maxWindowSamples);
+                mergedStartMs = actualEndMs - Math.round((mergedBuffer.length / sampleRate) * 1000);
+            } else {
+                mergedBuffer = tempBuffer;
+                mergedStartMs = previousStartMs;
+            }
+        } else {
+            mergedBuffer = finalBuffer;
+            mergedStartMs = actualStartMs;
+        }
+
+        actualEndMs = mergedStartMs + Math.round((mergedBuffer.length / sampleRate) * 1000);
+
+        return {
+            rawBuffer: mergedBuffer,
+            sampleRate,
+            dataStartTime: mergedStartMs,
+            lastFetchTime: actualEndMs,
+            chanCode
+        };
+    }
+
     async fetchStationData(station: any, nowMs: number, force: boolean = false) {
         const state = this.getOrCreateStationState(station.code, station);
         if (state.isFetching) return;
@@ -255,6 +494,12 @@ export class SeismicEngine {
             let net = station.network;
             let loc = '';
             const channels = station.channels || [];
+
+            // Detect if this station is being viewed with multi-component canvases (Detail View)
+            const isMultiComponent = Array.from(this.activeCanvases.keys()).some(c => 
+                c.getAttribute('data-station-code') === station.code && 
+                (c.getAttribute('data-component') === 'N' || c.getAttribute('data-component') === 'E')
+            );
             
             let isWebicorder = false;
             if (this.timeframe === '10s') latencyMs = 2 * 1000;
@@ -271,7 +516,6 @@ export class SeismicEngine {
 
             let isDelta = false;
             let previousBuffer: Float32Array | null = null;
-            let previousStartMs = 0;
 
             // Check if we can do a delta fetch to save bandwidth and speed up hover updates
             if (!force && state.lastFetchTime > 0 && state.rawFdsnBuffer.length > 0 && !state.hasFailed && state.dataStartTime > 0) {
@@ -284,7 +528,6 @@ export class SeismicEngine {
                     startDt = new Date(missingStartMs);
                     isDelta = true;
                     previousBuffer = state.rawFdsnBuffer;
-                    previousStartMs = state.dataStartTime;
                 }
             }
             
@@ -292,26 +535,26 @@ export class SeismicEngine {
             const endStr = endDt.toISOString().split('.')[0];
             
             const urls: string[] = [];
-            const addUrlsForCha = (channel: string) => {
+            const addUrlsForCha = (channelStr: string) => {
                 const baseUrls = [];
                 if (state.successfulProviderUrlBase) {
                      let queryNet = net;
                      if (net === 'C' && state.successfulProviderUrlBase.includes('earthscope')) queryNet = 'C1';
-                     baseUrls.push(`${state.successfulProviderUrlBase}?net=${queryNet}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                     baseUrls.push(`${state.successfulProviderUrlBase}?net=${queryNet}&sta=${station.code}&loc=${loc}&cha=${channelStr}&starttime=${startStr}&endtime=${endStr}`);
                 }
                 
                 if (net === 'C') {
-                    baseUrls.push(`/api/csn/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
-                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=C1&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`/api/csn/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channelStr}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=C1&sta=${station.code}&loc=${loc}&cha=${channelStr}&starttime=${startStr}&endtime=${endStr}`);
                 } else if (net === 'C1') {
-                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channelStr}&starttime=${startStr}&endtime=${endStr}`);
                 } else if (net === 'AM') {
-                    baseUrls.push(`https://fdsnws.raspberryshakedata.com/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://fdsnws.raspberryshakedata.com/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channelStr}&starttime=${startStr}&endtime=${endStr}`);
                 } else if (net === 'GE') {
-                    baseUrls.push(`https://geofon.gfz-potsdam.de/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
-                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://geofon.gfz-potsdam.de/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channelStr}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channelStr}&starttime=${startStr}&endtime=${endStr}`);
                 } else {
-                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channel}&starttime=${startStr}&endtime=${endStr}`);
+                    baseUrls.push(`https://service.earthscope.org/fdsnws/dataselect/1/query?net=${net}&sta=${station.code}&loc=${loc}&cha=${channelStr}&starttime=${startStr}&endtime=${endStr}`);
                 }
 
                 // Add to urls uniquely, preserving the successful provider at the very front
@@ -320,7 +563,26 @@ export class SeismicEngine {
                 }
             };
 
-            if (this.timeframe === '24h' || this.timeframe === '12h') {
+            if (isMultiComponent) {
+                // Find best 3-component triplet
+                let z = channels.find((c: string) => c.endsWith('Z')) || 'HHZ';
+                let prefix = z.slice(0, -1);
+                let n = channels.find((c: string) => c.startsWith(prefix) && (c.endsWith('N') || c.endsWith('1') || c.endsWith('Y')))
+                     || channels.find((c: string) => c.endsWith('N') || c.endsWith('1') || c.endsWith('Y'));
+                let e = channels.find((c: string) => c.startsWith(prefix) && (c.endsWith('E') || c.endsWith('2') || c.endsWith('X')))
+                     || channels.find((c: string) => c.endsWith('E') || c.endsWith('2') || c.endsWith('X'));
+                
+                if (net === 'AM') {
+                    if (channels.includes('ENN') && channels.includes('ENE')) {
+                        n = 'ENN';
+                        e = 'ENE';
+                    }
+                }
+                const queryChans = [z, n, e].filter(Boolean);
+                addUrlsForCha(queryChans.join(','));
+                // Also add fallback single channel if multi-channel query rejected
+                addUrlsForCha(z);
+            } else if (this.timeframe === '24h' || this.timeframe === '12h') {
                 if (net === 'AM') {
                     addUrlsForCha('EHZ');
                     addUrlsForCha('SHZ');
@@ -360,7 +622,6 @@ export class SeismicEngine {
                         const tempAb = await res.arrayBuffer();
                         if (tempAb.byteLength > 0) {
                             try {
-                                // Test parsing to ensure it's valid miniseed and has data
                                 const testRecords = miniseed.parseDataRecords(tempAb);
                                 if (testRecords.length > 0) {
                                     ab = tempAb;
@@ -380,7 +641,6 @@ export class SeismicEngine {
                             lastError = new Error('Empty ArrayBuffer');
                         }
                     } else if (res.status === 404 || res.status === 204) {
-                        // Data doesn't exist here, try next provider just in case
                         lastError = new Error(`HTTP ${res.status}`);
                     } else {
                         throw new Error(`HTTP ${res.status}`);
@@ -388,13 +648,12 @@ export class SeismicEngine {
                 } catch (err: any) {
                     clearTimeout(timeoutId);
                     lastError = err;
-                    // Network error or 503, continue to next URL
                 }
             }
 
             if (!ab) {
                 if (isDelta && previousBuffer) {
-                    // No new delta data (e.g. 204 No Content), but we have previous data. Just silently return and keep old data intact.
+                    // No new delta data, keep previous data intact
                     return;
                 }
                 state.hasFailed = true;
@@ -407,202 +666,104 @@ export class SeismicEngine {
                 throw new Error('No records in response');
             }
             
-            // Separate streams by channel identifier (net.sta.loc.cha) to prevent mixed location codes (e.g. 00 vs 10)
+            // Separate streams by channel identifier (net.sta.loc.cha)
             const channelMap = miniseed.byChannel(rawRecords);
-            let selectedRecords: any[] = [];
             
-            // Pick the stream with the most data records (primary stream)
-            let maxRecs = 0;
+            // Group streams into 3 components: Z (Vertical), N (North-South / Y), E (East-West / X)
+            const recordsByComponent: { Z: any[]; N: any[]; E: any[] } = { Z: [], N: [], E: [] };
+
             for (const [_chanKey, recList] of channelMap.entries()) {
-                if (recList.length > maxRecs) {
-                    maxRecs = recList.length;
-                    selectedRecords = recList;
+                if (!recList || recList.length === 0) continue;
+                const chan = (recList[0].header.chanCode || '').toUpperCase();
+                if (chan.endsWith('Z')) {
+                    recordsByComponent.Z.push(...recList);
+                } else if (chan.endsWith('N') || chan.endsWith('1') || chan.endsWith('Y')) {
+                    recordsByComponent.N.push(...recList);
+                } else if (chan.endsWith('E') || chan.endsWith('2') || chan.endsWith('X')) {
+                    recordsByComponent.E.push(...recList);
+                } else if (recordsByComponent.Z.length === 0) {
+                    recordsByComponent.Z.push(...recList);
                 }
             }
-            if (selectedRecords.length === 0) selectedRecords = rawRecords;
-            
-            // Sort records chronologically
-            selectedRecords.sort((a, b) => {
-                const tA = a.header?.startTime?.toMillis?.() || a.header?.startBTime?.toDateTime?.()?.toMillis?.() || 0;
-                const tB = b.header?.startTime?.toMillis?.() || b.header?.startBTime?.toDateTime?.()?.toMillis?.() || 0;
-                return tA - tB;
-            });
-            
-            const firstSampleRate = selectedRecords[0].header.sampleRate;
-            
-            // Helper: extract milliseconds from a miniseed header time object
-            const headerTimeMs = (header: any): number => {
-                if (!header) return 0;
-                if (header.startTime?.toMillis) return header.startTime.toMillis();
-                if (header.startBTime?.toDateTime) return header.startBTime.toDateTime().toMillis();
-                for (const field of ['start', 'startTime']) {
-                    const obj = header[field];
-                    if (!obj) continue;
-                    if (typeof obj.toMillis === 'function') return obj.toMillis();
-                    if (typeof obj.getTime === 'function') return obj.getTime();
-                    if (typeof obj === 'number') return obj;
-                    const v = obj.valueOf?.();
-                    if (typeof v === 'number' && v > 1e12) return v;
-                }
-                return 0;
-            };
-            
-            // Determine actual time boundaries from sorted record headers
-            let actualStartMs = headerTimeMs(selectedRecords[0].header) || startDt.getTime();
-            
-            const lastRec = selectedRecords[selectedRecords.length - 1];
-            const lastRecStartMs = headerTimeMs(lastRec.header);
-            const lastRecDurationMs = (lastRec.header.numSamples / lastRec.header.sampleRate) * 1000;
-            let actualEndMs = lastRecStartMs > 0 
-                ? lastRecStartMs + lastRecDurationMs 
-                : endDt.getTime();
-            
-            // Sanity: ensure end > start
-            if (actualEndMs <= actualStartMs) actualEndMs = actualStartMs + (windowSec * 1000);
-            
-            // Build time-indexed buffer: each sample slot maps to a precise time
-            const totalDurationMs = actualEndMs - actualStartMs;
-            const totalSamplesNeeded = Math.ceil((totalDurationMs / 1000) * firstSampleRate);
-            
-            // Cap buffer size to prevent memory issues (max ~12M samples)
-            const maxSamples = 12_000_000;
-            const cappedSamples = Math.min(totalSamplesNeeded, maxSamples);
-            const timeIndexedBuffer = new Float32Array(cappedSamples); // zeros = gaps
-            
-            // Calculate global trend (linear regression) to prevent massive drift
-            let validSampleCount = 0;
-            let sumX = 0, sumY = 0;
-            const decompressedRecords = [];
-            
-            // First pass: accumulate means
-            for (const rec of selectedRecords) {
-                const decoded = rec.decompress();
-                decompressedRecords.push(decoded);
-                
-                const recStartMs = headerTimeMs(rec.header);
-                if (recStartMs <= 0) continue;
-                const offsetMs = recStartMs - actualStartMs;
-                const offsetSamples = Math.round((offsetMs / 1000) * firstSampleRate);
-                
-                for (let i = 0; i < decoded.length; i++) {
-                    sumX += (offsetSamples + i);
-                    sumY += decoded[i];
-                    validSampleCount++;
-                }
-            }
-            
-            let slope = 0;
-            let intercept = 0;
-            if (validSampleCount > 1) {
-                const meanX = sumX / validSampleCount;
-                const meanY = sumY / validSampleCount;
-                
-                let num = 0, den = 0;
-                let recIdx = 0;
-                for (const rec of selectedRecords) {
-                    const decoded = decompressedRecords[recIdx++];
-                    const recStartMs = headerTimeMs(rec.header);
-                    if (recStartMs <= 0) continue;
-                    const offsetMs = recStartMs - actualStartMs;
-                    const offsetSamples = Math.round((offsetMs / 1000) * firstSampleRate);
-                    
-                    for (let i = 0; i < decoded.length; i++) {
-                        const x = offsetSamples + i;
-                        const y = decoded[i];
-                        const dx = x - meanX;
-                        num += dx * (y - meanY);
-                        den += dx * dx;
+
+            // Fallback: If no Z was classified, take the largest stream
+            if (recordsByComponent.Z.length === 0) {
+                let maxRecs = 0;
+                let primaryStream: any[] = [];
+                for (const [_chanKey, recList] of channelMap.entries()) {
+                    if (recList.length > maxRecs) {
+                        maxRecs = recList.length;
+                        primaryStream = recList;
                     }
                 }
-                
-                if (den !== 0) {
-                    slope = num / den;
-                }
-                intercept = meanY - slope * meanX;
-            } else if (validSampleCount === 1) {
-                intercept = sumY;
-            }
-            
-            // Place each record's samples at their correct time position, fully detrended
-            let maxWrittenIndex = 0;
-            let recIdx2 = 0;
-            for (const rec of selectedRecords) {
-                const recStartMs = headerTimeMs(rec.header);
-                const decoded = decompressedRecords[recIdx2++];
-                if (recStartMs <= 0) continue;
-                
-                const offsetMs = recStartMs - actualStartMs;
-                const offsetSamples = Math.round((offsetMs / 1000) * firstSampleRate);
-                
-                if (offsetSamples < 0 || offsetSamples >= cappedSamples) continue;
-                
-                const copyLen = Math.min(decoded.length, cappedSamples - offsetSamples);
-                for (let i = 0; i < copyLen; i++) {
-                    const x = offsetSamples + i;
-                    timeIndexedBuffer[x] = decoded[i] - (slope * x + intercept);
-                }
-                maxWrittenIndex = Math.max(maxWrittenIndex, offsetSamples + copyLen);
-            }
-            
-            const finalBuffer = (maxWrittenIndex > 0 && maxWrittenIndex < cappedSamples)
-                ? timeIndexedBuffer.subarray(0, maxWrittenIndex)
-                : timeIndexedBuffer;
-            
-            let mergedBuffer: Float32Array;
-            let mergedStartMs: number;
-
-            if (isDelta && previousBuffer) {
-                const gapMs = actualStartMs - previousStartMs;
-                const gapSamples = Math.max(0, Math.round((gapMs / 1000) * firstSampleRate));
-                
-                const newTotalLength = gapSamples + finalBuffer.length;
-                const tempBuffer = new Float32Array(newTotalLength);
-                
-                // Copy previous buffer up to the point where the new buffer starts
-                const copyLen = Math.min(previousBuffer.length, gapSamples);
-                if (copyLen > 0) {
-                    tempBuffer.set(previousBuffer.subarray(0, copyLen), 0);
-                }
-                
-                // Append the new buffer (overwriting any overlap seamlessly)
-                tempBuffer.set(finalBuffer, gapSamples);
-                
-                // Truncate from the left to keep only windowSec worth of data to prevent memory leak
-                const maxSamples = windowSec * firstSampleRate;
-                if (tempBuffer.length > maxSamples) {
-                    mergedBuffer = tempBuffer.subarray(tempBuffer.length - maxSamples);
-                    mergedStartMs = actualEndMs - Math.round((mergedBuffer.length / firstSampleRate) * 1000);
-                } else {
-                    mergedBuffer = tempBuffer;
-                    mergedStartMs = previousStartMs;
-                }
-            } else {
-                mergedBuffer = finalBuffer;
-                mergedStartMs = actualStartMs;
+                recordsByComponent.Z = primaryStream.length > 0 ? primaryStream : rawRecords;
             }
 
-            if (mergedBuffer.length > 0) {
-                actualEndMs = mergedStartMs + Math.round((mergedBuffer.length / firstSampleRate) * 1000);
-                state.sampleRate = firstSampleRate;
-                state.channelCode = selectedRecords[0].header.chanCode;
-                state.rawFdsnBuffer = mergedBuffer;
-                const filterResult = await this.applyFilterAsync(mergedBuffer, firstSampleRate, state.hpFilter, state.lpFilter);
-                state.bufferZ = filterResult.filteredData;
-                state.renderSampleRate = filterResult.effectiveSampleRate || firstSampleRate;
-                state.dataStartTime = mergedStartMs;
-                state.lastFetchTime = actualEndMs;
-                state.hasFailed = false;
-                
-                // compute maxAbs
-                let m = 0;
-                for (let i = 0; i < state.bufferZ.length; i++) {
-                    const v = Math.abs(state.bufferZ[i]);
-                    if (v > m) m = v;
+            // Process each available component stream
+            let anySuccess = false;
+            for (const comp of ['Z', 'N', 'E'] as const) {
+                const recs = recordsByComponent[comp];
+                if (recs && recs.length > 0) {
+                    const prevComp = state.components?.[comp];
+                    const prevRaw = (comp === 'Z') ? (prevComp?.rawBuffer || state.rawFdsnBuffer) : prevComp?.rawBuffer;
+                    const prevStart = (comp === 'Z') ? (prevComp?.dataStartTime || state.dataStartTime) : (prevComp?.dataStartTime || 0);
+
+                    const processed = this.processRecordStream(
+                        recs,
+                        isDelta ? (prevRaw || null) : null,
+                        prevStart,
+                        startDt.getTime(),
+                        endDt.getTime(),
+                        windowSec,
+                        isDelta
+                    );
+
+                    if (processed && processed.rawBuffer.length > 0) {
+                        anySuccess = true;
+                        const filterRes = await this.applyFilterAsync(processed.rawBuffer, processed.sampleRate, state.hpFilter, state.lpFilter);
+                        let m = 0;
+                        for (let i = 0; i < filterRes.filteredData.length; i++) {
+                            const v = Math.abs(filterRes.filteredData[i]);
+                            if (v > m) m = v;
+                        }
+
+                        let label = 'Vertical (Z)';
+                        if (comp === 'N') label = 'Norte-Sur (Y)';
+                        else if (comp === 'E') label = 'Este-Oeste (X)';
+
+                        state.components[comp] = {
+                            channelCode: processed.chanCode,
+                            component: comp,
+                            componentLabel: label,
+                            buffer: filterRes.filteredData,
+                            rawBuffer: processed.rawBuffer,
+                            sampleRate: processed.sampleRate,
+                            renderSampleRate: filterRes.effectiveSampleRate || processed.sampleRate,
+                            dataStartTime: processed.dataStartTime,
+                            lastFetchTime: processed.lastFetchTime,
+                            maxAbs: m
+                        };
+
+                        if (comp === 'Z') {
+                            state.sampleRate = processed.sampleRate;
+                            state.channelCode = processed.chanCode;
+                            state.rawFdsnBuffer = processed.rawBuffer;
+                            state.bufferZ = filterRes.filteredData;
+                            state.renderSampleRate = filterRes.effectiveSampleRate || processed.sampleRate;
+                            state.dataStartTime = processed.dataStartTime;
+                            state.lastFetchTime = processed.lastFetchTime;
+                            state.maxAbs = m;
+                            state.hasFailed = false;
+                        }
+                    }
                 }
-                state.maxAbs = m;
-            } else {
+            }
+
+            if (!anySuccess && (!state.bufferZ || state.bufferZ.length === 0)) {
                 state.hasFailed = true;
                 throw new Error('No samples extracted from records');
+            } else {
+                state.hasFailed = false;
             }
         } catch (e: any) {
             console.warn(`[FDSN] ${station.code}:`, e.message);
@@ -648,8 +809,13 @@ export class SeismicEngine {
         const ctx = canvas.getContext('2d')!;
         const dpr = window.devicePixelRatio || 1;
         
+        const comp = ((canvas.getAttribute('data-component') || 'Z').toUpperCase()) as 'Z' | 'N' | 'E';
         const state = this.getOrCreateStationState(station.code, station);
-        const buffer = state.bufferZ;
+        const compData = state.components?.[comp];
+
+        const buffer = (comp === 'Z')
+            ? (compData?.buffer || state.bufferZ)
+            : (compData?.buffer || new Float32Array(0));
         const bufLen = buffer.length;
 
         const windowSec = this.getTimeWindowSeconds();
@@ -660,7 +826,12 @@ export class SeismicEngine {
         else if (this.timeframe === '10m') latencyMs = 10 * 1000;
         else if (this.timeframe === '1h') latencyMs = 30 * 1000;
         else if (this.timeframe === '3h' || this.timeframe === '12h' || this.timeframe === '24h') latencyMs = 3 * 60 * 1000;
-        const logicalNow = state.lastFetchTime > 0 ? state.lastFetchTime : (Date.now() - latencyMs);
+        
+        const compLastFetch = compData?.lastFetchTime || state.lastFetchTime;
+        const compDataStart = compData?.dataStartTime || state.dataStartTime;
+        const activeSampleRate = compData?.renderSampleRate || compData?.sampleRate || (comp === 'Z' ? (state.renderSampleRate || state.sampleRate) : 100);
+
+        const logicalNow = compLastFetch > 0 ? compLastFetch : (Date.now() - latencyMs);
         
         let expectedRows = 1;
         if (this.timeframe === '24h') expectedRows = 24;
@@ -671,8 +842,8 @@ export class SeismicEngine {
         let rowDurationMs = windowMs / expectedRows;
 
         // Dynamic adjustment based on actual downloaded data duration
-        if (expectedRows > 1 && !state.hasFailed && state.dataStartTime > 0) {
-            const actualDurationMs = logicalNow - state.dataStartTime;
+        if (expectedRows > 1 && !state.hasFailed && compDataStart > 0) {
+            const actualDurationMs = logicalNow - compDataStart;
             if (actualDurationMs > 0 && actualDurationMs < windowMs) {
                 numRows = Math.max(1, Math.ceil(actualDurationMs / rowDurationMs));
             }
@@ -682,7 +853,7 @@ export class SeismicEngine {
         const logicalWindowStart = logicalNow - adaptedWindowMs;
 
         const cssWidth = canvas.parentElement?.clientWidth || 380;
-        const cssHeight = numRows > 1 ? (numRows * 50 + 20) : 105;
+        const cssHeight = numRows > 1 ? (numRows * 50 + 20) : (canvas.getAttribute('height') ? parseInt(canvas.getAttribute('height')!) : 105);
         
         if (canvas.style.height !== cssHeight + 'px') {
             canvas.style.height = cssHeight + 'px';
@@ -707,7 +878,8 @@ export class SeismicEngine {
         const padBottom = 16;
         const plotWidth = width - padLeft;
         
-        const maxAbs = Math.max(state.maxAbs || 0.0001, 0.0001);
+        const compMaxAbs = compData?.maxAbs || (comp === 'Z' ? state.maxAbs : 0.0001);
+        const maxAbs = Math.max(compMaxAbs || 0.0001, 0.0001);
         
         const rowHeight = (height - padBottom) / numRows;
         
@@ -739,7 +911,7 @@ export class SeismicEngine {
             // Y Grid
             ctx.strokeStyle = this.colors.gridMinor;
             ctx.lineWidth = 1;
-            const ySteps = [-0.75, 0.75]; // This maps to 0.75 * 0.5 * rowHeight = 0.375
+            const ySteps = [-0.75, 0.75];
             ctx.beginPath();
             ySteps.forEach(ratio => {
                 const y = plotCenterY + (ratio * rowHeight * 0.5);
@@ -837,9 +1009,16 @@ export class SeismicEngine {
             // Draw Trace
             if (bufLen > 0) {
                 let traceColor = this.colors.traceCSN;
-                if (station.network === 'AM') traceColor = this.colors.traceRS;
-                else if (station.network === 'IU' || station.network === 'II') traceColor = this.colors.traceGSN;
-                else if (station.network === 'GE') traceColor = this.colors.traceGEOFON;
+                if (comp === 'N') {
+                    traceColor = '#10b981'; // Vibrant Emerald Green for N / Y
+                } else if (comp === 'E') {
+                    traceColor = '#f59e0b'; // Solar Amber / Coral for E / X
+                } else {
+                    if (station.network === 'AM') traceColor = this.colors.traceRS;
+                    else if (station.network === 'IU' || station.network === 'II') traceColor = this.colors.traceGSN;
+                    else if (station.network === 'GE') traceColor = this.colors.traceGEOFON;
+                    else traceColor = '#00d2ff'; // Cyan for Z
+                }
 
                 ctx.strokeStyle = traceColor;
                 ctx.lineWidth = 1.2;
@@ -847,10 +1026,8 @@ export class SeismicEngine {
                 ctx.beginPath();
                 
                 // Segment of buffer that falls in this row
-                const activeSampleRate = state.renderSampleRate || state.sampleRate;
-                // t = state.dataStartTime + (i / activeSampleRate) * 1000
-                const startIndex = Math.max(0, Math.floor(((rowStartTime - state.dataStartTime) / 1000) * activeSampleRate));
-                const endIndex = Math.min(bufLen, Math.ceil(((rowEndTime - state.dataStartTime) / 1000) * activeSampleRate));
+                const startIndex = Math.max(0, Math.floor(((rowStartTime - compDataStart) / 1000) * activeSampleRate));
+                const endIndex = Math.min(bufLen, Math.ceil(((rowEndTime - compDataStart) / 1000) * activeSampleRate));
                 
                 if (startIndex < endIndex) {
                     const rowSamples = endIndex - startIndex;
@@ -858,7 +1035,7 @@ export class SeismicEngine {
                     
                     if (ptsPerPixel <= 1) {
                         for (let i = startIndex; i < endIndex; i++) {
-                            const t = state.dataStartTime + (i / activeSampleRate) * 1000;
+                            const t = compDataStart + (i / activeSampleRate) * 1000;
                             const x = padLeft + ((t - rowStartTime) / rowDurationMs) * plotWidth;
                             const y = plotCenterY - (buffer[i] * effectiveScale);
                             const clampedY = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, y));
@@ -898,33 +1075,41 @@ export class SeismicEngine {
                 }
             } else {
                 if (r === Math.floor(numRows / 2)) {
-                    ctx.fillStyle = '#94a3b8';
-                    ctx.font = '10px sans-serif';
+                    ctx.fillStyle = '#64748b';
+                    ctx.font = '11px JetBrains Mono, monospace';
                     ctx.textAlign = 'center';
-                    ctx.fillText("Esperando datos...", padLeft + (plotWidth/2), plotCenterY);
+                    if (state.hasFailed) {
+                        ctx.fillText('Sin datos disponibles', padLeft + (plotWidth / 2), plotCenterY);
+                    } else if (comp !== 'Z' && !compData && !state.isFetching) {
+                        ctx.fillText(`Componente ${comp === 'N' ? 'N / Y' : 'E / X'} no disponible (Sensor 1D)`, padLeft + (plotWidth / 2), plotCenterY);
+                    } else {
+                        ctx.fillText('Esperando datos...', padLeft + (plotWidth / 2), plotCenterY);
+                    }
                 }
             }
         }
         
-        let displayMax = this.formatCount(maxAbs);
-        const tag = document.getElementById(`pgv-tag-${station.code}`);
+        let displayMax = this.formatCount(compMaxAbs || maxAbs);
+        const tag = document.getElementById(`pgv-tag-${station.code}-${comp}`) || document.getElementById(`pgv-tag-${station.code}`);
         if (tag) {
             if (state.hasFailed) {
                 tag.textContent = `No hay datos disponibles`;
+            } else if (bufLen === 0 && comp !== 'Z' && !compData) {
+                tag.textContent = `No disponible`;
             } else {
-                tag.textContent = `Max: ±${displayMax} cnt | Datos: ${state.provider || 'N/A'}`;
+                const chanCode = compData?.channelCode || (comp === 'Z' ? state.channelCode : comp);
+                tag.textContent = `Max: ±${displayMax} cnt | ${chanCode || comp} | ${state.provider || 'N/A'}`;
             }
         }
         
-        // Update frequency range and sensor info dynamically based on fetched data
-        const rangeOverlay = document.getElementById(`range-overlay-${station.code}`);
-        const sensorMeta = document.getElementById(`sensor-meta-${station.code}`);
-        
-        if (rangeOverlay && state.sampleRate && !state.hasFailed) {
-            const nyquist = state.sampleRate / 2;
-            rangeOverlay.textContent = `Datos Reales: 0.01 - ${nyquist.toFixed(1)} Hz (${state.channelCode || '???'})`;
+        const rangeOverlay = document.getElementById(`range-overlay-${station.code}-${comp}`) || document.getElementById(`range-overlay-${station.code}`);
+        if (rangeOverlay && activeSampleRate && !state.hasFailed && bufLen > 0) {
+            const nyquist = activeSampleRate / 2;
+            const chanCode = compData?.channelCode || (comp === 'Z' ? state.channelCode : comp) || '???';
+            rangeOverlay.textContent = `0.01 - ${nyquist.toFixed(1)} Hz (${chanCode})`;
         }
         
+        const sensorMeta = document.getElementById(`sensor-meta-${station.code}`);
         if (sensorMeta && state.channelCode && !state.hasFailed) {
             let sensorType = 'Desconocido';
             const ch = state.channelCode.toUpperCase();

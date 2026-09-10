@@ -1,7 +1,7 @@
 import { SeismicEngine } from '../seismic-engine';
 // @ts-ignore
-import { getStationById } from '../stations-data.js';
-import { renderStationCardHtml } from '../components/StationCard';
+import { getStationById, CHILE_REGIONS } from '../stations-data.js';
+import { getStationFrequencyRange } from '../components/StationCard';
 
 export class StationDetailView {
     engine: SeismicEngine;
@@ -17,44 +17,180 @@ export class StationDetailView {
 
     render() {
         const st = getStationById(this.stationCode);
+        const tf = this.engine.timeframe;
+
         if (!st) {
-            this.container.innerHTML = `<div style="padding: 2rem; text-align: center;"><h2>Estación no encontrada: ${this.stationCode}</h2><button onclick="window.location.hash='#/'">Volver</button></div>`;
+            this.container.innerHTML = `
+                <div style="padding: 3rem; text-align: center; color: #94a3b8;">
+                    <h2 style="color: #f43f5e; margin-bottom: 1rem;">Estación no encontrada: ${this.stationCode}</h2>
+                    <p>Verifique el código o regrese al catálogo de regiones.</p>
+                    <a href="#/timeframe/${tf}/region/all" style="display: inline-block; margin-top: 1rem; padding: 0.6rem 1.2rem; background: #1e293b; color: #38bdf8; text-decoration: none; border-radius: 6px; border: 1px solid #334155;">
+                        ← Volver a Regiones
+                    </a>
+                </div>
+            `;
             return;
         }
 
-        // Hide region sidebar/filters if they exist
-        const topNav = document.querySelector('.top-nav-bar') as HTMLElement;
-        if (topNav) topNav.style.display = 'none';
+        const regInfo = CHILE_REGIONS[st.regionCode] || { name: 'Región de Chile', roman: '' };
+        const rangeInfo = getStationFrequencyRange(st, tf);
+
+        let netClass = 'net-csn';
+        if (st.network === 'AM') netClass = 'net-rs';
+        else if (st.network === 'IU' || st.network === 'II') netClass = 'net-gsn';
+        else if (st.network === 'GE') netClass = 'net-geofon';
+
+        let zoneIcon = '🌊';
+        let zonePillClass = 'pill-costa';
+        if (st.geomorphicZone === 'Valle') {
+            zoneIcon = '🏙️';
+            zonePillClass = 'pill-valle';
+        } else if (st.geomorphicZone === 'Cordillera') {
+            zoneIcon = '🏔️';
+            zonePillClass = 'pill-cordillera';
+        }
 
         this.container.innerHTML = `
-            <div style="padding: 1rem;">
-                <button onclick="window.history.back()" style="margin-bottom: 1rem; padding: 0.5rem 1rem; background: #1e293b; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                    ← Volver
-                </button>
-                <div style="max-width: 1200px; margin: 0 auto;">
-                    ${renderStationCardHtml(st, this.engine.timeframe)}
+            <div class="station-detail-container" style="max-width: 1400px; margin: 0 auto; padding: 1.2rem 1.5rem 3rem 1.5rem;">
+                
+                <!-- Web Tree Breadcrumb Navigation -->
+                <nav class="tree-breadcrumb" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.2rem; font-size: 0.88rem; flex-wrap: wrap; background: #0b1120; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                    <a href="#/timeframe/${tf}/region/all" style="color: #38bdf8; text-decoration: none; display: flex; align-items: center; gap: 0.3rem;">
+                        <span>📡</span> SismoRed (${tf})
+                    </a>
+                    <span style="color: #475569;">/</span>
+                    <a href="#/timeframe/${tf}/region/${st.regionCode}" style="color: #94a3b8; text-decoration: none; display: flex; align-items: center; gap: 0.3rem;">
+                        <span>📍</span> ${regInfo.roman} - ${regInfo.name}
+                    </a>
+                    <span style="color: #475569;">/</span>
+                    <span style="color: #e2e8f0; font-weight: 600; display: flex; align-items: center; gap: 0.3rem;">
+                        <span>🏷️</span> ${st.code} (${st.locality})
+                    </span>
+                </nav>
+
+                <!-- Station Header Bar -->
+                <header style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; background: #0f172a; padding: 1.2rem 1.5rem; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.1);">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem; flex-wrap: wrap;">
+                            <h1 style="margin: 0; font-size: 1.8rem; font-weight: 800; letter-spacing: -0.02em; color: #f8fafc;">${st.code}</h1>
+                            <span class="network-badge ${netClass}">${st.network} - ${st.networkName || st.operator}</span>
+                            <span class="zone-tag ${zonePillClass}">${zoneIcon} ${st.geomorphicZone}</span>
+                            <span style="background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25); padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; font-family: monospace;">
+                                3-Componentes (Z, N/Y, E/X)
+                            </span>
+                        </div>
+                        <div style="color: #94a3b8; font-size: 0.95rem;">
+                            ${st.locality} • Operado por <strong>${st.operator}</strong> • Coordenadas: <strong>${st.lat.toFixed(3)}° S, ${st.lon.toFixed(3)}° W</strong> • Elevación: <strong>${Math.round(st.elevation)} m</strong>
+                        </div>
+                    </div>
+
+                    <a href="#/timeframe/${tf}/region/${st.regionCode}" style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 1.1rem; background: #1e293b; color: #e2e8f0; text-decoration: none; border-radius: 6px; border: 1px solid #334155; font-size: 0.88rem; font-weight: 500; transition: all 0.15s;">
+                        ← Volver a ${regInfo.roman}
+                    </a>
+                </header>
+
+                <!-- Synchronized DSP Controls Bar -->
+                <div class="dsp-controls-panel" style="background: #0f172a; padding: 1rem 1.5rem; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 1.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+                        <span style="font-size: 0.85rem; font-weight: 600; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.05em;">
+                            🎛️ Filtros DSP y Ganancia (Sincronizados para los 3 componentes)
+                        </span>
+                        <span style="font-size: 0.8rem; color: #94a3b8;" id="range-overlay-${st.code}">
+                            Rango: ${rangeInfo.text}
+                        </span>
+                    </div>
+
+                    <div class="dsp-controls" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.2rem;">
+                        <div class="dsp-col">
+                            <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">
+                                <span>Filtro Pasa-Altos (HP):</span>
+                                <strong style="color: #0ea5e9;"><span id="hp-val-${st.code}">${rangeInfo.hpDefault < 0.1 ? rangeInfo.hpDefault.toFixed(3) : rangeInfo.hpDefault.toFixed(2)}</span> Hz</strong>
+                            </label>
+                            <input type="range" class="dsp-slider hp-slider" data-code="${st.code}" min="${rangeInfo.hpMin}" max="${rangeInfo.hpMax}" step="${rangeInfo.hpStep}" value="${rangeInfo.hpDefault}" style="accent-color:#0ea5e9; width: 100%;">
+                        </div>
+                        <div class="dsp-col">
+                            <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">
+                                <span>Filtro Pasa-Bajos (LP):</span>
+                                <strong style="color: #f59e0b;"><span id="lp-val-${st.code}">${rangeInfo.lpDefault < 1.0 ? rangeInfo.lpDefault.toFixed(2) : rangeInfo.lpDefault.toFixed(1)}</span> Hz</strong>
+                            </label>
+                            <input type="range" class="dsp-slider lp-slider" data-code="${st.code}" min="${rangeInfo.lpMin}" max="${rangeInfo.lpMax}" step="${rangeInfo.lpStep}" value="${rangeInfo.lpDefault}" style="accent-color:#f59e0b; width: 100%;">
+                        </div>
+                        <div class="dsp-col">
+                            <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">
+                                <span>Escala de Ganancia:</span>
+                                <strong style="color: #10b981;"><span id="gain-val-${st.code}">1.0x</span></strong>
+                            </label>
+                            <input type="range" class="dsp-slider gain-slider" data-code="${st.code}" min="0.2" max="5.0" step="0.1" value="1.0" style="accent-color:#10b981; width: 100%;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3-Component Waveform Cards -->
+                <div class="components-stack" style="display: flex; flex-direction: column; gap: 1.25rem;">
+
+                    <!-- Component Z (Vertical) -->
+                    <div class="component-card" style="background: #0f172a; border-radius: 10px; border: 1px solid rgba(56, 189, 248, 0.25); overflow: hidden; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 1.2rem; background: rgba(15, 23, 42, 0.95); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                <span style="background: #0284c7; color: white; padding: 0.2rem 0.55rem; border-radius: 4px; font-weight: 800; font-size: 0.85rem; font-family: monospace;">Z</span>
+                                <strong style="color: #f8fafc; font-size: 0.95rem;">Componente Vertical (Z)</strong>
+                                <span style="color: #64748b; font-size: 0.8rem;">(Movimiento arriba - abajo)</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.8rem;">
+                                <span id="range-overlay-${st.code}-Z" style="font-size: 0.8rem; color: #94a3b8; font-family: monospace;">0.01 - 50 Hz</span>
+                                <span id="pgv-tag-${st.code}-Z" style="background: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-family: monospace;">Esperando datos...</span>
+                            </div>
+                        </div>
+                        <div class="oscilloscope-container" style="height: 160px; min-height: 160px; position: relative;">
+                            <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-component="Z" height="160" style="width:100%; height:160px; display:block;"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Component N / Y (North-South) -->
+                    <div class="component-card" style="background: #0f172a; border-radius: 10px; border: 1px solid rgba(16, 185, 129, 0.25); overflow: hidden; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 1.2rem; background: rgba(15, 23, 42, 0.95); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                <span style="background: #059669; color: white; padding: 0.2rem 0.55rem; border-radius: 4px; font-weight: 800; font-size: 0.85rem; font-family: monospace;">N / Y</span>
+                                <strong style="color: #f8fafc; font-size: 0.95rem;">Componente Horizontal Norte-Sur (Y / N)</strong>
+                                <span style="color: #64748b; font-size: 0.8rem;">(Movimiento meridional)</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.8rem;">
+                                <span id="range-overlay-${st.code}-N" style="font-size: 0.8rem; color: #94a3b8; font-family: monospace;">0.01 - 50 Hz</span>
+                                <span id="pgv-tag-${st.code}-N" style="background: rgba(16, 185, 129, 0.1); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-family: monospace;">Esperando datos...</span>
+                            </div>
+                        </div>
+                        <div class="oscilloscope-container" style="height: 160px; min-height: 160px; position: relative;">
+                            <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-component="N" height="160" style="width:100%; height:160px; display:block;"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Component E / X (East-West) -->
+                    <div class="component-card" style="background: #0f172a; border-radius: 10px; border: 1px solid rgba(245, 158, 11, 0.25); overflow: hidden; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 1.2rem; background: rgba(15, 23, 42, 0.95); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                <span style="background: #d97706; color: white; padding: 0.2rem 0.55rem; border-radius: 4px; font-weight: 800; font-size: 0.85rem; font-family: monospace;">E / X</span>
+                                <strong style="color: #f8fafc; font-size: 0.95rem;">Componente Horizontal Este-Oeste (X / E)</strong>
+                                <span style="color: #64748b; font-size: 0.8rem;">(Movimiento zonal)</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.8rem;">
+                                <span id="range-overlay-${st.code}-E" style="font-size: 0.8rem; color: #94a3b8; font-family: monospace;">0.01 - 50 Hz</span>
+                                <span id="pgv-tag-${st.code}-E" style="background: rgba(245, 158, 11, 0.1); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-family: monospace;">Esperando datos...</span>
+                            </div>
+                        </div>
+                        <div class="oscilloscope-container" style="height: 160px; min-height: 160px; position: relative;">
+                            <canvas class="oscilloscope-canvas station-canvas-render" data-station-code="${st.code}" data-component="E" height="160" style="width:100%; height:160px; display:block;"></canvas>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         `;
 
-        // The card has max-height and widths in CSS that might constrain it, we can inject some overrides or just let it be big.
-        const card = this.container.querySelector('.station-card') as HTMLElement;
-        if (card) {
-            card.style.maxWidth = '100%';
-            const canvas = card.querySelector('canvas') as HTMLCanvasElement;
-            if (canvas) {
-                // Adjust height for detail view if desired
-                canvas.height = 300; 
-                canvas.style.height = '300px';
-            }
-        }
-
-        // Set up visible canvases for engine
+        // Register all 3 canvases with the engine
         const visibleMap = new Map<HTMLCanvasElement, any>();
-        const canvas = this.container.querySelector('.station-canvas-render') as HTMLCanvasElement;
-        if (canvas) {
-            visibleMap.set(canvas, st);
-        }
+        this.container.querySelectorAll('.station-canvas-render').forEach(canvas => {
+            visibleMap.set(canvas as HTMLCanvasElement, st);
+        });
         
         this.engine.setActiveCanvases(visibleMap);
         this.startPolling(st);
@@ -65,23 +201,21 @@ export class StationDetailView {
         
         const doPoll = () => {
             const tf = this.engine.timeframe;
-            if (!['10s', '1m', '10m'].includes(tf)) return; // No automatic refresh for these timeframes
+            if (!['10s', '1m', '10m'].includes(tf)) return; // No auto-refresh for long timeframes
             
-            const canvas = this.container.querySelector('.station-canvas-render') as HTMLCanvasElement;
-            if (!canvas) return; // Unmounted
+            const canvases = this.container.querySelectorAll('.station-canvas-render');
+            if (canvases.length === 0) return; // View unmounted
             this.engine.pollLiveFDSNForVisible([st], false);
         };
 
-        // Always trigger an initial fetch regardless of timeframe
+        // Trigger immediate fetch for the 3 components
         this.engine.pollLiveFDSNForVisible([st], true);
-        this.pollingInterval = setInterval(doPoll, 5000); // 5s polling for detail view
+        this.pollingInterval = setInterval(doPoll, 5000);
     }
 
     destroy() {
         if (this.pollingInterval) {
             clearInterval(this.pollingInterval);
         }
-        const topNav = document.querySelector('.top-nav-bar') as HTMLElement;
-        if (topNav) topNav.style.display = 'flex'; // Restore nav
     }
 }
