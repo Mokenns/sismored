@@ -42,41 +42,32 @@ self.onmessage = function(e: MessageEvent) {
     // 3. Robust zero-phase Butterworth filtering (Direct Form II Transposed with SciPy odd-reflection padding)
     data = applyBandpass(data, sampleRate, hpFreq, lpFreq);
     
-    // 4. Min-Max Decimation for Plotting
-    // If we have decimationFactor > 1, we compress the data but KEEP the peaks!
-    const decimationFactor = e.data.decimationFactor || 1;
+    // 4. Peak-preserving downsampling for display
+    // Reduces buffer size by decimationFactor, keeping the highest-amplitude peak per chunk
+    const decimationFactor = Math.max(1, Math.floor(e.data.decimationFactor || 1));
     let finalSampleRate = sampleRate;
     
-    if (decimationFactor > 1 && data.length > decimationFactor * 2) {
+    if (decimationFactor > 1 && data.length >= decimationFactor) {
         const numChunks = Math.floor(data.length / decimationFactor);
-        const outLen = numChunks * 2;
-        const decimated = new Float32Array(outLen);
+        const decimated = new Float32Array(numChunks);
         
         for (let i = 0; i < numChunks; i++) {
             const offset = i * decimationFactor;
-            let minVal = Infinity;
-            let maxVal = -Infinity;
-            let minIdx = -1;
-            let maxIdx = -1;
+            let maxAbs = -1;
+            let chosenVal = data[offset];
             
             for (let j = 0; j < decimationFactor; j++) {
                 const val = data[offset + j];
-                if (val < minVal) { minVal = val; minIdx = j; }
-                if (val > maxVal) { maxVal = val; maxIdx = j; }
+                const absVal = Math.abs(val);
+                if (absVal > maxAbs) {
+                    maxAbs = absVal;
+                    chosenVal = val;
+                }
             }
-            
-            // Output them in the order they occurred in time to prevent phase scrambling
-            if (minIdx <= maxIdx) {
-                decimated[i * 2] = minVal;
-                decimated[i * 2 + 1] = maxVal;
-            } else {
-                decimated[i * 2] = maxVal;
-                decimated[i * 2 + 1] = minVal;
-            }
+            decimated[i] = chosenVal;
         }
         data = decimated;
-        // We output 2 samples for every `decimationFactor` original samples.
-        finalSampleRate = sampleRate * (2 / decimationFactor);
+        finalSampleRate = sampleRate / decimationFactor;
     }
     
     postMessage({ id, filteredData: data, effectiveSampleRate: finalSampleRate }, [data.buffer]);

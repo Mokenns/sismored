@@ -250,7 +250,7 @@ export class SeismogramRenderer {
                     const activePlotPixels = Math.max(1, endPx - startPx);
                     const ptsPerPixel = rowSamples / activePlotPixels;
 
-                    if (ptsPerPixel <= 1) {
+                    if (ptsPerPixel <= 2.5 || (state.disableDecimation && rowSamples <= 40000)) {
                         let hasStarted = false;
                         const startSampleIdx = Math.max(0, Math.floor(((validRowStartMs - compDataStart) / 1000) * activeSampleRate));
                         const endSampleIdx = Math.min(bufLen, Math.ceil(((validRowEndMs - compDataStart) / 1000) * activeSampleRate));
@@ -268,10 +268,9 @@ export class SeismogramRenderer {
                             }
                         }
                     } else {
-                        // Peak-preserving decimation loop mapped to exact pixel time slices
+                        // Chronological extrema tracing mapped to exact subpixel time coordinates
                         let hasStarted = false;
                         for (let px = startPx; px < endPx; px++) {
-                            const actualPx = padLeft + px;
                             const tPixelStart = rowStartTime + (px / plotWidth) * rowDurationMs;
                             const tPixelEnd = rowStartTime + ((px + 1) / plotWidth) * rowDurationMs;
 
@@ -281,25 +280,40 @@ export class SeismogramRenderer {
                             if (sliceStart < sliceEnd) {
                                 let minVal = Infinity;
                                 let maxVal = -Infinity;
+                                let minIdx = sliceStart;
+                                let maxIdx = sliceStart;
                                 for (let s = sliceStart; s < sliceEnd; s++) {
                                     const v = buffer[s];
-                                    if (v < minVal) minVal = v;
-                                    if (v > maxVal) maxVal = v;
+                                    if (v < minVal) { minVal = v; minIdx = s; }
+                                    if (v > maxVal) { maxVal = v; maxIdx = s; }
                                 }
 
                                 if (minVal !== Infinity) {
-                                    let yMin = plotCenterY - (minVal * effectiveScale);
-                                    let yMax = plotCenterY - (maxVal * effectiveScale);
-                                    yMin = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, yMin));
-                                    yMax = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, yMax));
+                                    const tMin = compDataStart + (minIdx / activeSampleRate) * 1000;
+                                    const xMin = padLeft + ((tMin - rowStartTime) / rowDurationMs) * plotWidth;
+                                    const yMin = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, plotCenterY - (minVal * effectiveScale)));
 
-                                    if (!hasStarted) {
-                                        ctx.moveTo(actualPx, yMin);
-                                        hasStarted = true;
+                                    const tMax = compDataStart + (maxIdx / activeSampleRate) * 1000;
+                                    const xMax = padLeft + ((tMax - rowStartTime) / rowDurationMs) * plotWidth;
+                                    const yMax = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, plotCenterY - (maxVal * effectiveScale)));
+
+                                    if (minIdx <= maxIdx) {
+                                        if (!hasStarted) {
+                                            ctx.moveTo(xMin, yMin);
+                                            hasStarted = true;
+                                        } else {
+                                            ctx.lineTo(xMin, yMin);
+                                        }
+                                        ctx.lineTo(xMax, yMax);
                                     } else {
-                                        ctx.lineTo(actualPx, yMin);
+                                        if (!hasStarted) {
+                                            ctx.moveTo(xMax, yMax);
+                                            hasStarted = true;
+                                        } else {
+                                            ctx.lineTo(xMax, yMax);
+                                        }
+                                        ctx.lineTo(xMin, yMin);
                                     }
-                                    ctx.lineTo(actualPx, yMax);
                                 }
                             }
                         }
@@ -332,7 +346,8 @@ export class SeismogramRenderer {
                 tag.textContent = 'No disponible';
             } else {
                 const chanCode = compData?.channelCode || (comp === 'Z' ? state.channelCode : comp);
-                const hdTag = state.disableDecimation ? ' | ⚡ HD' : '';
+                const roundedRate = Math.round(activeSampleRate);
+                const hdTag = state.disableDecimation ? ` | ⚡ HD (${roundedRate} Hz)` : ` | 📊 ${roundedRate} Hz`;
                 tag.textContent = `Max: ±${displayMax} cnt | ${chanCode || comp} | ${state.provider || 'N/A'}${hdTag}`;
             }
         }

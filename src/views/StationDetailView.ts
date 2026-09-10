@@ -42,6 +42,8 @@ export class StationDetailView {
         const isHD = Boolean(state.disableDecimation);
         const config = getTimeframeConfig(tf);
         const decimationFactor = config.decimationFactor;
+        const rawRate = Math.round(st.sampleRate || state.sampleRate || 100);
+        const decimatedRate = Math.max(1, Math.round(rawRate / decimationFactor));
 
         this.container.innerHTML = `
             <div class="station-detail-container" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: 0.5rem 0.5rem 2.5rem 0.5rem; margin: 0;">
@@ -119,7 +121,7 @@ export class StationDetailView {
                             <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">
                                 <span>Resolución / Diezmado:</span>
                                 <strong id="decimation-label-${st.code}" style="color: ${isHD ? '#38bdf8' : '#94a3b8'};">
-                                    ${isHD ? '⚡ HD (Sin Diezmar)' : `📊 Diezmado (${decimationFactor}x)`}
+                                    ${isHD ? `⚡ HD Nativo (${rawRate} Hz)` : `📊 Diezmado (${decimationFactor}x • ${decimatedRate} Hz)`}
                                 </strong>
                             </label>
                             <button id="btn-toggle-decimation-${st.code}" class="btn-decimation-toggle ${isHD ? 'active' : ''}" style="
@@ -138,7 +140,7 @@ export class StationDetailView {
                                 gap: 0.4rem;
                                 transition: all 0.2s;
                             ">
-                                <span>${isHD ? '⚡ Desactivar HD (Diezmar)' : '🔬 Ver sin diezmar (HD)'}</span>
+                                <span>${isHD ? `⚡ Desactivar HD (Volver a ${decimatedRate} Hz)` : `🔬 Ver sin diezmar (HD ${rawRate} Hz)`}</span>
                             </button>
                         </div>
                     </div>
@@ -220,9 +222,9 @@ export class StationDetailView {
                     decimationBtn.style.background = 'rgba(56, 189, 248, 0.18)';
                     decimationBtn.style.color = '#38bdf8';
                     decimationBtn.style.borderColor = '#38bdf8';
-                    decimationBtn.innerHTML = '<span>⚡ Desactivar HD (Diezmar)</span>';
+                    decimationBtn.innerHTML = `<span>⚡ Desactivar HD (Volver a ${decimatedRate} Hz)</span>`;
                     if (label) {
-                        label.textContent = '⚡ HD (Sin Diezmar)';
+                        label.textContent = `⚡ HD Nativo (${rawRate} Hz)`;
                         label.style.color = '#38bdf8';
                     }
                 } else {
@@ -230,9 +232,9 @@ export class StationDetailView {
                     decimationBtn.style.background = '#1e293b';
                     decimationBtn.style.color = '#e2e8f0';
                     decimationBtn.style.borderColor = '#334155';
-                    decimationBtn.innerHTML = '<span>🔬 Ver sin diezmar (HD)</span>';
+                    decimationBtn.innerHTML = `<span>🔬 Ver sin diezmar (HD ${rawRate} Hz)</span>`;
                     if (label) {
-                        label.textContent = `📊 Diezmado (${decimationFactor}x)`;
+                        label.textContent = `📊 Diezmado (${decimationFactor}x • ${decimatedRate} Hz)`;
                         label.style.color = '#94a3b8';
                     }
                 }
