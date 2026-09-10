@@ -887,7 +887,20 @@ export class SeismicEngine {
         const plotWidth = width - padLeft;
         
         const compMaxAbs = compData?.maxAbs || (comp === 'Z' ? state.maxAbs : 0.0001);
-        const maxAbs = Math.max(compMaxAbs || 0.0001, 0.0001);
+        let commonMaxAbs = compMaxAbs;
+
+        if (isDetailComponent) {
+            // Normalize scaling across all 3 components (Z, N, E) so relative amplitude is directly comparable
+            const zMax = state.components?.Z?.maxAbs || state.maxAbs || 0;
+            const nMax = state.components?.N?.maxAbs || 0;
+            const eMax = state.components?.E?.maxAbs || 0;
+            const triaxialMax = Math.max(zMax, nMax, eMax);
+            if (triaxialMax > 0.0001) {
+                commonMaxAbs = triaxialMax;
+            }
+        }
+
+        const maxAbs = Math.max(commonMaxAbs || 0.0001, 0.0001);
         
         const rowHeight = (height - padBottom) / numRows;
         
