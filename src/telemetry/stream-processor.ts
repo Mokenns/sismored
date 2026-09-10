@@ -141,6 +141,7 @@ export function processRecordStream(
         }
     }
 
+    let maxWrittenIndex = -1;
     for (let r = 0; r < records.length; r++) {
         const decoded = decompressedRecords[r];
         const recStartMs = getHeaderTimeMs(records[r].header);
@@ -153,12 +154,19 @@ export function processRecordStream(
             if (idx >= 0 && idx < cappedSamples) {
                 const baseline = intercept + slope * idx;
                 timeIndexedBuffer[idx] = decoded[i] - baseline;
+                if (idx > maxWrittenIndex) maxWrittenIndex = idx;
             }
         }
     }
 
-    let finalBuffer = timeIndexedBuffer;
+    const validSampleLength = maxWrittenIndex >= 0 ? (maxWrittenIndex + 1) : 0;
+    const trimmedBuffer = validSampleLength > 0 && validSampleLength < cappedSamples
+        ? timeIndexedBuffer.subarray(0, validSampleLength)
+        : timeIndexedBuffer;
+
+    let finalBuffer = trimmedBuffer;
     let finalStartMs = actualStartMs;
+    let finalEndMs = validSampleLength > 0 ? (actualStartMs + (validSampleLength / sampleRate) * 1000) : actualEndMs;
 
     if (isDelta && previousBuffer && previousBuffer.length > 0 && previousStartMs > 0) {
         const shiftMs = actualStartMs - previousStartMs;
@@ -168,12 +176,13 @@ export function processRecordStream(
             const merged = new Float32Array(previousBuffer.length);
             merged.set(previousBuffer.subarray(shiftSamples));
             const overlapIndex = previousBuffer.length - shiftSamples;
-            const copyLen = Math.min(timeIndexedBuffer.length, merged.length - overlapIndex);
+            const copyLen = Math.min(trimmedBuffer.length, merged.length - overlapIndex);
             if (copyLen > 0) {
-                merged.set(timeIndexedBuffer.subarray(0, copyLen), overlapIndex);
+                merged.set(trimmedBuffer.subarray(0, copyLen), overlapIndex);
             }
             finalBuffer = merged;
             finalStartMs = previousStartMs + (shiftSamples / sampleRate) * 1000;
+            finalEndMs = finalStartMs + (merged.length / sampleRate) * 1000;
         }
     }
 
@@ -181,7 +190,7 @@ export function processRecordStream(
         rawBuffer: finalBuffer,
         sampleRate,
         dataStartTime: finalStartMs,
-        lastFetchTime: actualEndMs,
+        lastFetchTime: finalEndMs,
         chanCode
     };
 }

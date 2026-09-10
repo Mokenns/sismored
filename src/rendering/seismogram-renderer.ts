@@ -238,46 +238,69 @@ export class SeismogramRenderer {
                 ctx.lineJoin = 'round';
                 ctx.beginPath();
 
-                const startIndex = Math.max(0, Math.floor(((rowStartTime - compDataStart) / 1000) * activeSampleRate));
-                const endIndex = Math.min(bufLen, Math.ceil(((rowEndTime - compDataStart) / 1000) * activeSampleRate));
+                const compDataEnd = compDataStart + (bufLen / activeSampleRate) * 1000;
+                const validRowStartMs = Math.max(rowStartTime, compDataStart);
+                const validRowEndMs = Math.min(rowEndTime, compDataEnd);
 
-                if (startIndex < endIndex) {
-                    const rowSamples = endIndex - startIndex;
-                    const ptsPerPixel = rowSamples / plotWidth;
+                if (validRowStartMs < validRowEndMs) {
+                    const startPx = Math.max(0, Math.floor(((validRowStartMs - rowStartTime) / rowDurationMs) * plotWidth));
+                    const endPx = Math.min(plotWidth, Math.ceil(((validRowEndMs - rowStartTime) / rowDurationMs) * plotWidth));
+
+                    const rowSamples = Math.round(((validRowEndMs - validRowStartMs) / 1000) * activeSampleRate);
+                    const activePlotPixels = Math.max(1, endPx - startPx);
+                    const ptsPerPixel = rowSamples / activePlotPixels;
 
                     if (ptsPerPixel <= 1) {
-                        for (let i = startIndex; i < endIndex; i++) {
+                        let hasStarted = false;
+                        const startSampleIdx = Math.max(0, Math.floor(((validRowStartMs - compDataStart) / 1000) * activeSampleRate));
+                        const endSampleIdx = Math.min(bufLen, Math.ceil(((validRowEndMs - compDataStart) / 1000) * activeSampleRate));
+
+                        for (let i = startSampleIdx; i < endSampleIdx; i++) {
                             const t = compDataStart + (i / activeSampleRate) * 1000;
                             const x = padLeft + ((t - rowStartTime) / rowDurationMs) * plotWidth;
                             const y = plotCenterY - (buffer[i] * effectiveScale);
                             const clampedY = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, y));
-                            if (i === startIndex) ctx.moveTo(x, clampedY);
-                            else ctx.lineTo(x, clampedY);
+                            if (!hasStarted) {
+                                ctx.moveTo(x, clampedY);
+                                hasStarted = true;
+                            } else {
+                                ctx.lineTo(x, clampedY);
+                            }
                         }
                     } else {
-                        // Peak-preserving decimation loop
-                        for (let px = 0; px < plotWidth; px++) {
+                        // Peak-preserving decimation loop mapped to exact pixel time slices
+                        let hasStarted = false;
+                        for (let px = startPx; px < endPx; px++) {
                             const actualPx = padLeft + px;
-                            const sliceStart = Math.floor(startIndex + (px * ptsPerPixel));
-                            const sliceEnd = Math.min(bufLen, Math.floor(startIndex + ((px + 1) * ptsPerPixel)));
+                            const tPixelStart = rowStartTime + (px / plotWidth) * rowDurationMs;
+                            const tPixelEnd = rowStartTime + ((px + 1) / plotWidth) * rowDurationMs;
 
-                            let minVal = Infinity;
-                            let maxVal = -Infinity;
-                            for (let s = sliceStart; s < sliceEnd; s++) {
-                                const v = buffer[s];
-                                if (v < minVal) minVal = v;
-                                if (v > maxVal) maxVal = v;
-                            }
+                            const sliceStart = Math.max(0, Math.floor(((tPixelStart - compDataStart) / 1000) * activeSampleRate));
+                            const sliceEnd = Math.min(bufLen, Math.ceil(((tPixelEnd - compDataStart) / 1000) * activeSampleRate));
 
-                            if (minVal !== Infinity) {
-                                let yMin = plotCenterY - (minVal * effectiveScale);
-                                let yMax = plotCenterY - (maxVal * effectiveScale);
-                                yMin = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, yMin));
-                                yMax = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, yMax));
+                            if (sliceStart < sliceEnd) {
+                                let minVal = Infinity;
+                                let maxVal = -Infinity;
+                                for (let s = sliceStart; s < sliceEnd; s++) {
+                                    const v = buffer[s];
+                                    if (v < minVal) minVal = v;
+                                    if (v > maxVal) maxVal = v;
+                                }
 
-                                if (px === 0) ctx.moveTo(actualPx, yMin);
-                                else ctx.lineTo(actualPx, yMin);
-                                ctx.lineTo(actualPx, yMax);
+                                if (minVal !== Infinity) {
+                                    let yMin = plotCenterY - (minVal * effectiveScale);
+                                    let yMax = plotCenterY - (maxVal * effectiveScale);
+                                    yMin = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, yMin));
+                                    yMax = Math.max(rowStartY + 1, Math.min(rowStartY + rowHeight - 1, yMax));
+
+                                    if (!hasStarted) {
+                                        ctx.moveTo(actualPx, yMin);
+                                        hasStarted = true;
+                                    } else {
+                                        ctx.lineTo(actualPx, yMin);
+                                    }
+                                    ctx.lineTo(actualPx, yMax);
+                                }
                             }
                         }
                     }
@@ -309,7 +332,8 @@ export class SeismogramRenderer {
                 tag.textContent = 'No disponible';
             } else {
                 const chanCode = compData?.channelCode || (comp === 'Z' ? state.channelCode : comp);
-                tag.textContent = `Max: ±${displayMax} cnt | ${chanCode || comp} | ${state.provider || 'N/A'}`;
+                const hdTag = state.disableDecimation ? ' | ⚡ HD' : '';
+                tag.textContent = `Max: ±${displayMax} cnt | ${chanCode || comp} | ${state.provider || 'N/A'}${hdTag}`;
             }
         }
 

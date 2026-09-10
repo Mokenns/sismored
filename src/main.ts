@@ -327,6 +327,15 @@ class SismoRedApp {
                 this.currentView.render();
             }
         });
+
+        let resizeTimer: any = null;
+        window.addEventListener('resize', () => {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                this.engine.forceRender();
+                resizeTimer = null;
+            }, 100);
+        });
     }
 
     updateStationCardControlsForTimeframe(tf: string) {

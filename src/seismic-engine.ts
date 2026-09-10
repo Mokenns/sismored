@@ -37,6 +37,7 @@ export interface StationState {
     station: any;
     customGain: number;
     maxAbs: number;
+    disableDecimation?: boolean;
     components: {
         Z?: ComponentTraceData;
         N?: ComponentTraceData;
@@ -184,13 +185,12 @@ export class SeismicEngine {
         return getTimeframeConfig(this.timeframe).seconds;
     }
 
-    async setStationFilter(stationCode: string, hp: number, lp: number) {
+    async reapplyStationFilters(stationCode: string) {
         const state = this.stationsState.get(stationCode);
         if (!state) return;
 
-        state.hpFilter = hp;
-        state.lpFilter = lp;
         const config = getTimeframeConfig(this.timeframe);
+        const effectiveDecimation = state.disableDecimation ? 1 : config.decimationFactor;
         const filterPromises: Promise<any>[] = [];
 
         // Filter Z component
@@ -198,7 +198,7 @@ export class SeismicEngine {
         const zRate = state.components?.Z?.sampleRate || state.sampleRate;
         if (zRaw && zRaw.length > 0) {
             filterPromises.push(
-                this.dspService.filterWaveform(zRaw, zRate, hp, lp, config.decimationFactor).then(res => {
+                this.dspService.filterWaveform(zRaw, zRate, state.hpFilter, state.lpFilter, effectiveDecimation).then(res => {
                     if (state.components?.Z) {
                         state.components.Z.buffer = res.filteredData;
                         state.components.Z.renderSampleRate = res.effectiveSampleRate;
@@ -216,7 +216,7 @@ export class SeismicEngine {
             const compData = state.components?.[comp];
             if (compData?.rawBuffer && compData.rawBuffer.length > 0) {
                 filterPromises.push(
-                    this.dspService.filterWaveform(compData.rawBuffer, compData.sampleRate, hp, lp, config.decimationFactor).then(res => {
+                    this.dspService.filterWaveform(compData.rawBuffer, compData.sampleRate, state.hpFilter, state.lpFilter, effectiveDecimation).then(res => {
                         compData.buffer = res.filteredData;
                         compData.renderSampleRate = res.effectiveSampleRate;
                         compData.maxAbs = this.calculateMaxAbs(res.filteredData);
@@ -229,6 +229,22 @@ export class SeismicEngine {
             await Promise.all(filterPromises);
             this.renderStationCanvas(stationCode);
         }
+    }
+
+    async setStationFilter(stationCode: string, hp: number, lp: number) {
+        const state = this.stationsState.get(stationCode);
+        if (!state) return;
+        state.hpFilter = hp;
+        state.lpFilter = lp;
+        await this.reapplyStationFilters(stationCode);
+    }
+
+    async toggleStationDecimation(stationCode: string): Promise<boolean> {
+        const state = this.stationsState.get(stationCode);
+        if (!state) return false;
+        state.disableDecimation = !state.disableDecimation;
+        await this.reapplyStationFilters(stationCode);
+        return !state.disableDecimation;
     }
 
     private calculateMaxAbs(data: Float32Array): number {
@@ -364,7 +380,7 @@ export class SeismicEngine {
                             processed.sampleRate,
                             state.hpFilter,
                             state.lpFilter,
-                            config.decimationFactor
+                            state.disableDecimation ? 1 : config.decimationFactor
                         );
 
                         const maxAbs = this.calculateMaxAbs(filterRes.filteredData);

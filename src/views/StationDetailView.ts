@@ -2,7 +2,7 @@ import { SeismicEngine } from '../seismic-engine';
 // @ts-ignore
 import { getStationById, CHILE_REGIONS } from '../stations-data.js';
 import { getStationFrequencyRange, getNetworkBadgeClass, getGeomorphicZoneInfo } from '../utils/station-helpers';
-import { isHighFrequencyTimeframe } from '../config/timeframes';
+import { isHighFrequencyTimeframe, getTimeframeConfig } from '../config/timeframes';
 
 export class StationDetailView {
     engine: SeismicEngine;
@@ -38,8 +38,13 @@ export class StationDetailView {
         const netClass = getNetworkBadgeClass(st.network);
         const { icon: zoneIcon, pillClass: zonePillClass } = getGeomorphicZoneInfo(st.geomorphicZone);
 
+        const state = this.engine.getOrCreateStationState(this.stationCode, st);
+        const isHD = Boolean(state.disableDecimation);
+        const config = getTimeframeConfig(tf);
+        const decimationFactor = config.decimationFactor;
+
         this.container.innerHTML = `
-            <div class="station-detail-container" style="max-width: 1400px; margin: 0 auto; padding: 1.2rem 1.5rem 3rem 1.5rem;">
+            <div class="station-detail-container" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: 0.5rem 0.5rem 2.5rem 0.5rem; margin: 0;">
                 
                 <!-- Web Tree Breadcrumb Navigation -->
                 <nav class="tree-breadcrumb" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.2rem; font-size: 0.88rem; flex-wrap: wrap; background: #0b1120; padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
@@ -88,7 +93,7 @@ export class StationDetailView {
                         </span>
                     </div>
 
-                    <div class="dsp-controls" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.2rem;">
+                    <div class="dsp-controls" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.2rem; align-items: flex-end;">
                         <div class="dsp-col">
                             <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">
                                 <span>Filtro Pasa-Altos (HP):</span>
@@ -109,6 +114,32 @@ export class StationDetailView {
                                 <strong style="color: #10b981;"><span id="gain-val-${st.code}">1.0x</span></strong>
                             </label>
                             <input type="range" class="dsp-slider gain-slider" data-code="${st.code}" min="0.2" max="5.0" step="0.1" value="1.0" style="accent-color:#10b981; width: 100%;">
+                        </div>
+                        <div class="dsp-col" style="display: flex; flex-direction: column; justify-content: flex-end;">
+                            <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">
+                                <span>Resolución / Diezmado:</span>
+                                <strong id="decimation-label-${st.code}" style="color: ${isHD ? '#38bdf8' : '#94a3b8'};">
+                                    ${isHD ? '⚡ HD (Sin Diezmar)' : `📊 Diezmado (${decimationFactor}x)`}
+                                </strong>
+                            </label>
+                            <button id="btn-toggle-decimation-${st.code}" class="btn-decimation-toggle ${isHD ? 'active' : ''}" style="
+                                width: 100%;
+                                padding: 0.45rem 0.8rem;
+                                background: ${isHD ? 'rgba(56, 189, 248, 0.18)' : '#1e293b'};
+                                color: ${isHD ? '#38bdf8' : '#e2e8f0'};
+                                border: 1px solid ${isHD ? '#38bdf8' : '#334155'};
+                                border-radius: 6px;
+                                font-size: 0.82rem;
+                                font-weight: 600;
+                                cursor: pointer;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                gap: 0.4rem;
+                                transition: all 0.2s;
+                            ">
+                                <span>${isHD ? '⚡ Desactivar HD (Diezmar)' : '🔬 Ver sin diezmar (HD)'}</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -173,6 +204,40 @@ export class StationDetailView {
                 </div>
             </div>
         `;
+
+        const decimationBtn = this.container.querySelector(`#btn-toggle-decimation-${st.code}`) as HTMLButtonElement;
+        if (decimationBtn) {
+            decimationBtn.addEventListener('click', async () => {
+                decimationBtn.disabled = true;
+                decimationBtn.innerHTML = '<span>⏳ Calculando HD...</span>';
+                const isDecimated = await this.engine.toggleStationDecimation(st.code);
+                const currentHD = !isDecimated;
+                decimationBtn.disabled = false;
+
+                const label = document.getElementById(`decimation-label-${st.code}`);
+                if (currentHD) {
+                    decimationBtn.classList.add('active');
+                    decimationBtn.style.background = 'rgba(56, 189, 248, 0.18)';
+                    decimationBtn.style.color = '#38bdf8';
+                    decimationBtn.style.borderColor = '#38bdf8';
+                    decimationBtn.innerHTML = '<span>⚡ Desactivar HD (Diezmar)</span>';
+                    if (label) {
+                        label.textContent = '⚡ HD (Sin Diezmar)';
+                        label.style.color = '#38bdf8';
+                    }
+                } else {
+                    decimationBtn.classList.remove('active');
+                    decimationBtn.style.background = '#1e293b';
+                    decimationBtn.style.color = '#e2e8f0';
+                    decimationBtn.style.borderColor = '#334155';
+                    decimationBtn.innerHTML = '<span>🔬 Ver sin diezmar (HD)</span>';
+                    if (label) {
+                        label.textContent = `📊 Diezmado (${decimationFactor}x)`;
+                        label.style.color = '#94a3b8';
+                    }
+                }
+            });
+        }
 
         // Register all 3 canvases with the engine
         const visibleMap = new Map<HTMLCanvasElement, any>();
