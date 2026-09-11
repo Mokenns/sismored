@@ -270,9 +270,11 @@ export class SeismicEngine {
         let isDelta = false;
         let previousBuffer: Float32Array | null = null;
 
-        // Delta fetching for fast real-time polling
-        if (!force && state.lastFetchTime > 0 && state.rawFdsnBuffer.length > 0 && !state.hasFailed && state.dataStartTime > 0) {
-            const overlapMs = this.timeframe === '10s' ? 2000 : (this.timeframe === '1m' ? 5000 : 15000);
+        // Delta fetching is disabled for small high-frequency windows (10s, 1m)
+        // because full fetches are tiny (<4 KB) and delta shifting creates zero-fill and seam artifacts.
+        const allowDelta = this.timeframe !== '10s' && this.timeframe !== '1m';
+        if (allowDelta && !force && state.lastFetchTime > 0 && state.rawFdsnBuffer.length > 0 && !state.hasFailed && state.dataStartTime > 0) {
+            const overlapMs = 15000;
             const missingStartMs = state.lastFetchTime - overlapMs;
             if (missingStartMs > startDt.getTime() && missingStartMs < endDt.getTime()) {
                 startDt = new Date(missingStartMs);

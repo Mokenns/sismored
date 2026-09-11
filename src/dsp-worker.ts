@@ -70,8 +70,29 @@ self.onmessage = function(e: MessageEvent) {
         finalSampleRate = sampleRate / decimationFactor;
     }
     
+    // 5. Apply edge tapering to prevent boundary artifacts and filter transients on displayed data
+    data = applyCosineTaper(data, 0.025);
+    
     postMessage({ id, filteredData: data, effectiveSampleRate: finalSampleRate }, [data.buffer]);
 };
+
+// Smooth Tukey / Cosine (Hann) taper for trace boundaries
+function applyCosineTaper(data: Float32Array, taperFraction = 0.025): Float32Array {
+    const n = data.length;
+    if (n <= 10) return data;
+    
+    // Taper width: 2.5% of total samples on each edge, between 5 and 60 samples
+    const taperLen = Math.min(60, Math.max(5, Math.floor(n * taperFraction)));
+    
+    for (let i = 0; i < taperLen; i++) {
+        // Smooth Hann curve: 0.5 * (1 - cos(pi * i / taperLen))
+        const w = 0.5 * (1 - Math.cos((Math.PI * i) / taperLen));
+        data[i] *= w;
+        data[n - 1 - i] *= w;
+    }
+    return data;
+}
+
 function applyBandpass(data: Float32Array, sampleRate: number, hpFreq: number, lpFreq: number): Float32Array {
     if (!sampleRate || sampleRate <= 0) return data;
     const nyquist = sampleRate * 0.499;
@@ -126,8 +147,8 @@ function filtfilt(x: Float32Array, b0: number, b1: number, b2: number, a1: numbe
     const n = x.length;
     if (n <= 4) return x;
     
-    // Choose padding length based on signal size (up to 200 samples)
-    const padlen = Math.min(n - 1, Math.max(30, Math.min(300, Math.floor(n * 0.1))));
+    // Choose padding length based on signal size (minimum 50 samples, up to 400 samples)
+    const padlen = Math.min(n - 1, Math.max(50, Math.min(400, Math.floor(n * 0.2))));
     const extLen = n + 2 * padlen;
     const ext = new Float64Array(extLen);
     

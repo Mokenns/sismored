@@ -44,6 +44,9 @@ export class StationDetailView {
         const decimationFactor = config.decimationFactor;
         const rawRate = Math.round(st.sampleRate || state.sampleRate || 100);
         const decimatedRate = Math.max(1, Math.round(rawRate / decimationFactor));
+        const currentHp = state.hpFilter !== undefined ? state.hpFilter : rangeInfo.hpDefault;
+        const currentLp = state.lpFilter !== undefined ? state.lpFilter : rangeInfo.lpDefault;
+        const currentGain = state.customGain !== undefined ? state.customGain : 1.0;
 
         this.container.innerHTML = `
             <div class="station-detail-container" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: 0.5rem 0.5rem 2.5rem 0.5rem; margin: 0;">
@@ -99,23 +102,23 @@ export class StationDetailView {
                         <div class="dsp-col">
                             <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">
                                 <span>Filtro Pasa-Altos (HP):</span>
-                                <strong style="color: #0ea5e9;"><span id="hp-val-${st.code}">${rangeInfo.hpDefault < 0.1 ? rangeInfo.hpDefault.toFixed(3) : rangeInfo.hpDefault.toFixed(2)}</span> Hz</strong>
+                                <strong style="color: #0ea5e9;"><span id="hp-val-${st.code}">${currentHp < 0.1 ? currentHp.toFixed(3) : currentHp.toFixed(2)}</span> Hz</strong>
                             </label>
-                            <input type="range" class="dsp-slider hp-slider" data-code="${st.code}" min="${rangeInfo.hpMin}" max="${rangeInfo.hpMax}" step="${rangeInfo.hpStep}" value="${rangeInfo.hpDefault}" style="accent-color:#0ea5e9; width: 100%;">
+                            <input type="range" class="dsp-slider hp-slider" data-code="${st.code}" min="${rangeInfo.hpMin}" max="${rangeInfo.hpMax}" step="${rangeInfo.hpStep}" value="${currentHp}" style="accent-color:#0ea5e9; width: 100%;">
                         </div>
                         <div class="dsp-col">
                             <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">
                                 <span>Filtro Pasa-Bajos (LP):</span>
-                                <strong style="color: #f59e0b;"><span id="lp-val-${st.code}">${rangeInfo.lpDefault < 1.0 ? rangeInfo.lpDefault.toFixed(2) : rangeInfo.lpDefault.toFixed(1)}</span> Hz</strong>
+                                <strong style="color: #f59e0b;"><span id="lp-val-${st.code}">${currentLp < 1.0 ? currentLp.toFixed(2) : currentLp.toFixed(1)}</span> Hz</strong>
                             </label>
-                            <input type="range" class="dsp-slider lp-slider" data-code="${st.code}" min="${rangeInfo.lpMin}" max="${rangeInfo.lpMax}" step="${rangeInfo.lpStep}" value="${rangeInfo.lpDefault}" style="accent-color:#f59e0b; width: 100%;">
+                            <input type="range" class="dsp-slider lp-slider" data-code="${st.code}" min="${rangeInfo.lpMin}" max="${rangeInfo.lpMax}" step="${rangeInfo.lpStep}" value="${currentLp}" style="accent-color:#f59e0b; width: 100%;">
                         </div>
                         <div class="dsp-col">
                             <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">
                                 <span>Escala de Ganancia:</span>
-                                <strong style="color: #10b981;"><span id="gain-val-${st.code}">1.0x</span></strong>
+                                <strong style="color: #10b981;"><span id="gain-val-${st.code}">${currentGain.toFixed(1)}x</span></strong>
                             </label>
-                            <input type="range" class="dsp-slider gain-slider" data-code="${st.code}" min="0.2" max="5.0" step="0.1" value="1.0" style="accent-color:#10b981; width: 100%;">
+                            <input type="range" class="dsp-slider gain-slider" data-code="${st.code}" min="0.2" max="5.0" step="0.1" value="${currentGain}" style="accent-color:#10b981; width: 100%;">
                         </div>
                         <div class="dsp-col" style="display: flex; flex-direction: column; justify-content: flex-end;">
                             <label class="dsp-label" style="display: flex; justify-content: space-between; color: #cbd5e1; font-size: 0.82rem; margin-bottom: 0.3rem;">

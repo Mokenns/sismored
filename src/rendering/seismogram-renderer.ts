@@ -42,10 +42,19 @@ export class SeismogramRenderer {
         const windowMs = windowSec * 1000;
         const latencyMs = timeframeConfig.latencyMs;
 
-        const compLastFetch = compData?.lastFetchTime || state.lastFetchTime;
+        let compLastFetch = compData?.lastFetchTime || state.lastFetchTime;
         const compDataStart = compData?.dataStartTime || state.dataStartTime;
         const activeSampleRate = compData?.renderSampleRate || compData?.sampleRate
             || (comp === 'Z' ? (state.renderSampleRate || state.sampleRate) : 100);
+
+        if (isDetailComponent) {
+            // Synchronize time base across all 3 components for exact phase and grid alignment
+            const zFetch = state.components?.Z?.lastFetchTime || state.lastFetchTime || 0;
+            const nFetch = state.components?.N?.lastFetchTime || 0;
+            const eFetch = state.components?.E?.lastFetchTime || 0;
+            const maxFetch = Math.max(zFetch, nFetch, eFetch);
+            if (maxFetch > 0) compLastFetch = maxFetch;
+        }
 
         const logicalNow = compLastFetch > 0 ? compLastFetch : (Date.now() - latencyMs);
 

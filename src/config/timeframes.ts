@@ -17,7 +17,7 @@ export const TIMEFRAMES: Record<string, TimeframeConfig> = {
         id: '10s',
         label: '10s',
         seconds: 10,
-        latencyMs: 2_000,
+        latencyMs: 3_000,
         expectedRows: 1,
         tickIntervalSec: 2,
         decimationFactor: 2,
