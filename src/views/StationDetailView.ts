@@ -268,7 +268,9 @@ export class StationDetailView {
 
         // Trigger immediate fetch for the 3 components
         this.engine.pollLiveFDSNForVisible([st], true);
-        this.pollingInterval = setInterval(doPoll, 5000);
+        const config = getTimeframeConfig(this.engine.timeframe);
+        const refreshMs = (config.autoRefreshSec || 5) * 1000;
+        this.pollingInterval = setInterval(doPoll, refreshMs);
     }
 
     destroy() {

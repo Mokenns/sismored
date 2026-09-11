@@ -65,12 +65,9 @@ export function getHeaderTimeMs(header: any): number {
 
 export function processRecordStream(
     records: any[],
-    previousBuffer: Float32Array | null,
-    previousStartMs: number,
     startDtMs: number,
     endDtMs: number,
-    windowSec: number,
-    isDelta: boolean
+    windowSec: number
 ): ProcessedStreamResult | null {
     if (!records || records.length === 0) return null;
 
@@ -164,30 +161,11 @@ export function processRecordStream(
         ? timeIndexedBuffer.subarray(0, validSampleLength)
         : timeIndexedBuffer;
 
-    let finalBuffer = trimmedBuffer;
-    let finalStartMs = actualStartMs;
-    let finalEndMs = validSampleLength > 0 ? (actualStartMs + (validSampleLength / sampleRate) * 1000) : actualEndMs;
-
-    if (isDelta && previousBuffer && previousBuffer.length > 0 && previousStartMs > 0) {
-        const shiftMs = actualStartMs - previousStartMs;
-        const shiftSamples = Math.round((shiftMs / 1000) * sampleRate);
-
-        if (shiftSamples > 0 && shiftSamples < previousBuffer.length) {
-            const merged = new Float32Array(previousBuffer.length);
-            merged.set(previousBuffer.subarray(shiftSamples));
-            const overlapIndex = previousBuffer.length - shiftSamples;
-            const copyLen = Math.min(trimmedBuffer.length, merged.length - overlapIndex);
-            if (copyLen > 0) {
-                merged.set(trimmedBuffer.subarray(0, copyLen), overlapIndex);
-            }
-            finalBuffer = merged;
-            finalStartMs = previousStartMs + (shiftSamples / sampleRate) * 1000;
-            finalEndMs = finalStartMs + (merged.length / sampleRate) * 1000;
-        }
-    }
+    const finalStartMs = actualStartMs;
+    const finalEndMs = validSampleLength > 0 ? (actualStartMs + (validSampleLength / sampleRate) * 1000) : actualEndMs;
 
     return {
-        rawBuffer: finalBuffer,
+        rawBuffer: trimmedBuffer,
         sampleRate,
         dataStartTime: finalStartMs,
         lastFetchTime: finalEndMs,

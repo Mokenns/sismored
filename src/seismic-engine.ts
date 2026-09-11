@@ -256,7 +256,7 @@ export class SeismicEngine {
         return Math.max(max, 0.0001);
     }
 
-    async fetchStationData(station: any, nowMs: number, force = false) {
+    async fetchStationData(station: any, nowMs: number, _force = false) {
         const state = this.getOrCreateStationState(station.code, station);
         if (state.isFetching) return;
         state.isFetching = true;
@@ -265,23 +265,7 @@ export class SeismicEngine {
         const config = getTimeframeConfig(this.timeframe);
         const windowSec = config.seconds;
         const endDt = new Date(nowMs - config.latencyMs);
-        let startDt = new Date(endDt.getTime() - (windowSec * 1000));
-
-        let isDelta = false;
-        let previousBuffer: Float32Array | null = null;
-
-        // Delta fetching is disabled for small high-frequency windows (10s, 1m)
-        // because full fetches are tiny (<4 KB) and delta shifting creates zero-fill and seam artifacts.
-        const allowDelta = this.timeframe !== '10s' && this.timeframe !== '1m';
-        if (allowDelta && !force && state.lastFetchTime > 0 && state.rawFdsnBuffer.length > 0 && !state.hasFailed && state.dataStartTime > 0) {
-            const overlapMs = 15000;
-            const missingStartMs = state.lastFetchTime - overlapMs;
-            if (missingStartMs > startDt.getTime() && missingStartMs < endDt.getTime()) {
-                startDt = new Date(missingStartMs);
-                isDelta = true;
-                previousBuffer = state.rawFdsnBuffer;
-            }
-        }
+        const startDt = new Date(endDt.getTime() - (windowSec * 1000));
 
         const startStr = startDt.toISOString().split('.')[0];
         const endStr = endDt.toISOString().split('.')[0];
@@ -344,7 +328,6 @@ export class SeismicEngine {
 
         try {
             if (!ab) {
-                if (isDelta && previousBuffer) return; // Keep previous buffer on temporary delta glitch
                 state.hasFailed = true;
                 throw lastError || new Error('No data returned');
             }
@@ -361,18 +344,11 @@ export class SeismicEngine {
             for (const comp of ['Z', 'N', 'E'] as const) {
                 const recs = recordsByComponent[comp];
                 if (recs && recs.length > 0) {
-                    const prevComp = state.components?.[comp];
-                    const prevRaw = comp === 'Z' ? (prevComp?.rawBuffer || state.rawFdsnBuffer) : prevComp?.rawBuffer;
-                    const prevStart = comp === 'Z' ? (prevComp?.dataStartTime || state.dataStartTime) : (prevComp?.dataStartTime || 0);
-
                     const processed = processRecordStream(
                         recs,
-                        isDelta ? (prevRaw || null) : null,
-                        prevStart,
                         startDt.getTime(),
                         endDt.getTime(),
-                        windowSec,
-                        isDelta
+                        windowSec
                     );
 
                     if (processed && processed.rawBuffer.length > 0) {
